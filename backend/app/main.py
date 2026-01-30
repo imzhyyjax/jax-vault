@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import universe, assets, portfolios
+from app.api import universe, assets, portfolios, overall, trades, holdings, prices
 
 app = FastAPI(
     title="JAX-VAULT API",
@@ -22,6 +22,10 @@ app.add_middleware(
 app.include_router(universe.router)
 app.include_router(assets.router)
 app.include_router(portfolios.router)
+app.include_router(overall.router)
+app.include_router(trades.router)
+app.include_router(holdings.router)
+app.include_router(prices.router)
 
 
 @app.get("/")

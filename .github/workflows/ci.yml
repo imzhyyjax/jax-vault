@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ dev ]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [ dev ]
 
 jobs:
   backend-test:
@@ -95,7 +95,7 @@ jobs:
     name: Deploy
     needs: [backend-test, frontend-test]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/dev'
     
     steps:
       - name: Checkout code
