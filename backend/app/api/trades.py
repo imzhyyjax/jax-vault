@@ -8,8 +8,153 @@ from app.schemas.trade import (
     TradeWithDetails
 )
 from app.schemas.trade_quick import QuickBuyRequest, QuickBuyResponse
+from app.schemas.position_import import PositionImportRequest, PositionImportResponse
 
 router = APIRouter(prefix="/trades", tags=["Trades"])
+
+
+@router.post("/import_position")
+def import_position(req: PositionImportRequest):
+    """导入持仓：根据当前市值和收益反推成本和份额
+    
+    流程：
+    1. 查找或创建默认组合
+    2. 获取最新净值
+    3. 计算：成本 = 当前市值 - 持有收益
+    4. 计算：份额 = 当前市值 / 最新净值
+    5. 创建持仓快照（不创建交易记录，因为不知道具体买入信息）
+    """
+    print("\n" + "="*60)
+    print("🔵 [导入持仓] 开始处理请求")
+    print(f"   资产ID: {req.asset_id}")
+    print(f"   持仓金额: ¥{req.current_value}")
+    print(f"   持有收益: ¥{req.profit_loss}")
+    print("="*60)
+    
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    try:
+        from datetime import date
+        today = date.today()
+        
+        # 1. 确定组合
+        print("\n📁 步骤1: 确定投资组合")
+        portfolio_id = req.portfolio_id
+        if not portfolio_id:
+            cur.execute("""
+                SELECT id FROM portfolios 
+                WHERE name = '默认组合' AND include_in_overall = true
+                LIMIT 1
+            """)
+            portfolio = cur.fetchone()
+            
+            if not portfolio:
+                cur.execute("""
+                    INSERT INTO portfolios (name, include_in_overall)
+                    VALUES ('默认组合', true)
+                    RETURNING id
+                """)
+                portfolio = cur.fetchone()
+                conn.commit()
+            
+            portfolio_id = portfolio["id"]
+        
+        # 2. 检查资产是否存在
+        cur.execute("SELECT id, code, name FROM assets WHERE id = %(id)s", {"id": req.asset_id})
+        asset = cur.fetchone()
+        if not asset:
+            raise HTTPException(status_code=404, detail="资产不存在")
+        
+        # 3. 获取最新净值
+        print(f"\n💰 步骤3: 查询最新净值")
+        cur.execute("""
+            SELECT nav, price_date FROM prices
+            WHERE asset_id = %(asset_id)s
+            ORDER BY price_date DESC
+            LIMIT 1
+        """, {"asset_id": req.asset_id})
+        
+        price_row = cur.fetchone()
+        if not price_row:
+            print(f"   ❌ 未找到价格数据")
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到该资产的净值数据，请先导入价格数据"
+            )
+        
+        nav = float(price_row["nav"])
+        print(f"   ✅ 最新净值: {nav} (日期: {price_row['price_date']})")
+        
+        # 4. 计算成本和份额
+        print(f"\n🧮 步骤4: 计算成本和份额")
+        cost_value = req.current_value - req.profit_loss  # 成本 = 市值 - 收益
+        shares = req.current_value / nav  # 份额 = 市值 / 净值
+        print(f"   持仓金额: ¥{req.current_value:,.2f}")
+        print(f"   持有收益: ¥{req.profit_loss:,.2f}")
+        print(f"   → 计算成本: ¥{cost_value:,.2f}")
+        print(f"   → 计算份额: {shares:,.2f}")
+        
+        # 5. 创建或更新今日持仓快照
+        print(f"\n💾 步骤5: 保存持仓快照")
+        print(f"   组合ID: {portfolio_id}")
+        print(f"   资产ID: {req.asset_id}")
+        print(f"   快照日期: {today}")
+        
+        cur.execute("""
+            INSERT INTO holdings_snapshot 
+            (portfolio_id, asset_id, snap_date, shares, market_value, cost_value, source, note)
+            VALUES (%(portfolio_id)s, %(asset_id)s, %(snap_date)s, %(shares)s, %(market_value)s, %(cost_value)s, 'import', %(note)s)
+            ON CONFLICT (portfolio_id, asset_id, snap_date)
+            DO UPDATE SET 
+                shares = EXCLUDED.shares,
+                market_value = EXCLUDED.market_value,
+                cost_value = EXCLUDED.cost_value,
+                source = 'import',
+                note = EXCLUDED.note,
+                updated_at = now()
+        """, {
+            "portfolio_id": portfolio_id,
+            "asset_id": req.asset_id,
+            "snap_date": today,
+            "shares": shares,
+            "market_value": req.current_value,
+            "cost_value": cost_value,
+            "note": req.note or f"导入持仓：{asset['name']}"
+        })
+        
+        conn.commit()
+        print(f"   ✅ 持仓快照已保存")
+        
+        print(f"\n🎉 [导入持仓] 处理成功!")
+        print(f"   资产: {asset['name']}")
+        print(f"   份额: {round(shares, 2)}")
+        print(f"   市值: ¥{req.current_value:,.2f}")
+        print(f"   成本: ¥{cost_value:,.2f}")
+        print(f"   收益: ¥{req.profit_loss:,.2f}")
+        print("="*60 + "\n")
+        
+        return PositionImportResponse(
+            success=True,
+            portfolio_id=portfolio_id,
+            asset_id=req.asset_id,
+            current_value=req.current_value,
+            profit_loss=req.profit_loss,
+            cost_value=cost_value,
+            shares=round(shares, 2),
+            nav=nav,
+            message=f"成功导入 {asset['name']} 的持仓，份额：{round(shares, 2)}"
+        )
+        
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 
 @router.post("/quick_buy")
@@ -22,6 +167,13 @@ def quick_buy(req: QuickBuyRequest):
     3. 计算份额 = 买入金额 / 净值
     4. 创建买入交易记录
     """
+    print("\n" + "="*60)
+    print("🟢 [快速买入] 开始处理请求")
+    print(f"   资产ID: {req.asset_id}")
+    print(f"   买入金额: ¥{req.buy_amount}")
+    print(f"   买入日期: {req.buy_date}")
+    print("="*60)
+    
     conn = get_conn()
     cur = conn.cursor()
     
@@ -68,31 +220,91 @@ def quick_buy(req: QuickBuyRequest):
                 detail=f"未找到该资产在 {req.buy_date} 或之前的净值数据，请先导入价格数据"
             )
         
-        nav = price_row["nav"]
+        nav = float(price_row["nav"])  # 转换为 float
         
         # 4. 计算份额
-        shares = req.buy_amount / nav
+        quantity = req.buy_amount / nav
         
         # 5. 创建交易记录
         cur.execute("""
             INSERT INTO trades 
-            (portfolio_id, asset_id, trade_date, trade_type, shares, price, amount, note)
+            (portfolio_id, asset_id, trade_date, side, quantity, price, amount, note)
             VALUES 
             (%(portfolio_id)s, %(asset_id)s, %(trade_date)s, 'buy', 
-             %(shares)s, %(price)s, %(amount)s, %(note)s)
+             %(quantity)s, %(price)s, %(amount)s, %(note)s)
             RETURNING id
         """, {
             "portfolio_id": portfolio_id,
             "asset_id": req.asset_id,
             "trade_date": req.buy_date,
-            "shares": shares,
+            "quantity": quantity,
             "price": nav,
             "amount": req.buy_amount,
             "note": req.note or f"快速买入 {asset['name']}"
         })
         
         trade = cur.fetchone()
+        
+        # 6. 自动更新今日持仓快照
+        from datetime import date
+        today = date.today()
+        
+        # 查询该资产在该组合的所有交易，计算当前持仓
+        cur.execute("""
+            SELECT 
+                COALESCE(SUM(CASE WHEN side = 'buy' THEN quantity ELSE -quantity END), 0) as total_quantity,
+                COALESCE(SUM(CASE WHEN side = 'buy' THEN amount ELSE -amount END), 0) as total_cost
+            FROM trades
+            WHERE portfolio_id = %(portfolio_id)s 
+            AND asset_id = %(asset_id)s
+            AND is_valid = true
+        """, {"portfolio_id": portfolio_id, "asset_id": req.asset_id})
+        
+        position = cur.fetchone()
+        total_quantity = float(position["total_quantity"])
+        total_cost = float(position["total_cost"])
+        
+        # 获取最新净值计算市值
+        cur.execute("""
+            SELECT nav FROM prices
+            WHERE asset_id = %(asset_id)s
+            ORDER BY price_date DESC
+            LIMIT 1
+        """, {"asset_id": req.asset_id})
+        
+        latest_price = cur.fetchone()
+        current_nav = float(latest_price["nav"]) if latest_price else nav
+        market_value = total_quantity * current_nav
+        
+        # 创建或更新今日持仓快照
+        cur.execute("""
+            INSERT INTO holdings_snapshot 
+            (portfolio_id, asset_id, snap_date, shares, market_value, cost_value, source)
+            VALUES (%(portfolio_id)s, %(asset_id)s, %(snap_date)s, %(shares)s, %(market_value)s, %(cost_value)s, 'system')
+            ON CONFLICT (portfolio_id, asset_id, snap_date)
+            DO UPDATE SET 
+                shares = EXCLUDED.shares,
+                market_value = EXCLUDED.market_value,
+                cost_value = EXCLUDED.cost_value,
+                source = 'system',
+                updated_at = now()
+        """, {
+            "portfolio_id": portfolio_id,
+            "asset_id": req.asset_id,
+            "snap_date": today,
+            "shares": total_quantity,
+            "market_value": market_value,
+            "cost_value": total_cost
+        })
+        
         conn.commit()
+        
+        print(f"\n🎉 [快速买入] 处理成功!")
+        print(f"   资产: {asset['name']}")
+        print(f"   份额: {round(quantity, 2)}")
+        print(f"   净值: {nav}")
+        print(f"   金额: ¥{req.buy_amount:,.2f}")
+        print("="*60 + "\n")
         
         return QuickBuyResponse(
             success=True,
@@ -102,14 +314,18 @@ def quick_buy(req: QuickBuyRequest):
             buy_amount=req.buy_amount,
             buy_date=req.buy_date,
             nav=nav,
-            shares=round(shares, 2),
-            message=f"成功买入 {asset['name']}，份额：{round(shares, 2)}"
+            shares=round(quantity, 2),
+            message=f"成功买入 {asset['name']}，份额：{round(quantity, 2)}，持仓已更新"
         )
         
-    except HTTPException:
+    except HTTPException as e:
+        print(f"\n❌ [快速买入] HTTP错误: {e.detail}")
+        print("="*60 + "\n")
         conn.rollback()
         raise
     except Exception as e:
+        print(f"\n❌ [快速买入] 系统错误: {str(e)}")
+        print("="*60 + "\n")
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:

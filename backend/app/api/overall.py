@@ -91,7 +91,7 @@ def get_overall_stats():
 
 @router.get("/holdings")
 def get_overall_holdings():
-    """获取整体持仓列表"""
+    """获取整体持仓列表（带资产占比）"""
     conn = get_conn()
     cur = conn.cursor()
 
@@ -111,7 +111,17 @@ def get_overall_holdings():
         conn.close()
         return []
 
-    # 获取整体持仓（聚合后）
+    # 先获取总市值（用于计算占比）
+    total_value_sql = """
+    SELECT COALESCE(SUM(market_value), 0) as total_value
+    FROM v_overall_holdings
+    WHERE snap_date = %(latest_date)s
+    """
+    cur.execute(total_value_sql, {"latest_date": latest_date})
+    total_value_result = cur.fetchone()
+    total_value = float(total_value_result["total_value"])
+
+    # 获取整体持仓（聚合后，带占比）
     sql = """
     SELECT
         h.asset_id,
@@ -128,14 +138,19 @@ def get_overall_holdings():
             WHEN h.cost_value > 0 
             THEN ((h.market_value - h.cost_value) / h.cost_value * 100)
             ELSE 0 
-        END as return_rate
+        END as return_rate,
+        CASE 
+            WHEN %(total_value)s > 0 
+            THEN (h.market_value / %(total_value)s * 100)
+            ELSE 0 
+        END as weight_pct
     FROM v_overall_holdings h
     JOIN assets a ON a.id = h.asset_id
     WHERE h.snap_date = %(latest_date)s
     ORDER BY h.market_value DESC
     """
 
-    cur.execute(sql, {"latest_date": latest_date})
+    cur.execute(sql, {"latest_date": latest_date, "total_value": total_value})
     holdings = cur.fetchall()
 
     cur.close()

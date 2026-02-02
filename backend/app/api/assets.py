@@ -228,22 +228,28 @@ def delete_asset(asset_id: int):
     conn = get_conn()
     cur = conn.cursor()
 
-    # 检查是否有关联的持仓或交易（可选：更严格的检查）
+    # 检查是否有关联的持仓或交易（保护重要数据）
     check_sql = """
-    SELECT COUNT(*) as cnt FROM holdings_snapshot WHERE asset_id = %(id)s
-    UNION ALL
-    SELECT COUNT(*) FROM trades WHERE asset_id = %(id)s
+    SELECT 
+        (SELECT COUNT(*) FROM holdings_snapshot WHERE asset_id = %(id)s) as holdings_cnt,
+        (SELECT COUNT(*) FROM trades WHERE asset_id = %(id)s) as trades_cnt,
+        (SELECT COUNT(*) FROM prices WHERE asset_id = %(id)s) as prices_cnt
     """
     cur.execute(check_sql, {"id": asset_id})
-    results = cur.fetchall()
+    result = cur.fetchone()
     
-    if any(row["cnt"] > 0 for row in results):
+    # 如果有持仓或交易记录，不允许删除（保护核心数据）
+    if result["holdings_cnt"] > 0 or result["trades_cnt"] > 0:
         cur.close()
         conn.close()
         raise HTTPException(
             status_code=400,
-            detail="该资产有关联的持仓或交易记录，无法删除"
+            detail=f"该资产有关联的持仓或交易记录，无法删除。持仓记录: {result['holdings_cnt']}，交易记录: {result['trades_cnt']}"
         )
+
+    # 如果只有价格数据，先删除价格数据（允许删除纯字典资产）
+    if result["prices_cnt"] > 0:
+        cur.execute("DELETE FROM prices WHERE asset_id = %(id)s", {"id": asset_id})
 
     # 删除资产
     delete_sql = "DELETE FROM assets WHERE id = %(id)s RETURNING id"
