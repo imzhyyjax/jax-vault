@@ -19,7 +19,7 @@ class PositionImportResponse(BaseModel):
     current_value: float
     profit_loss: float
     cost_value: float
-    shares: float
-    nav: float
+    shares: Optional[float]
+    nav: Optional[float]
     message: str
 

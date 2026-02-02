@@ -6,37 +6,220 @@ from app.schemas.holding import QuickHoldingCreate
 router = APIRouter(prefix="/holdings", tags=["Holdings"])
 
 
+def _get_or_create_default_portfolio(cur, conn):
+    cur.execute("""
+        SELECT id FROM portfolios 
+        WHERE name = '默认组合' AND include_in_overall = true
+        LIMIT 1
+    """)
+    portfolio = cur.fetchone()
+    if not portfolio:
+        cur.execute("""
+            INSERT INTO portfolios (name, include_in_overall)
+            VALUES ('默认组合', true)
+            RETURNING id
+        """)
+        portfolio = cur.fetchone()
+        conn.commit()
+    return portfolio["id"]
+
+
+def _get_default_portfolio_id(cur):
+    cur.execute("""
+        SELECT id FROM portfolios 
+        WHERE name = '默认组合' AND include_in_overall = true
+        LIMIT 1
+    """)
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
+@router.delete("/portfolio/{portfolio_id}/asset/{asset_id}")
+def delete_holdings_by_portfolio_asset(portfolio_id: int, asset_id: int):
+    """仅删除某组合下某资产的持仓快照"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            DELETE FROM holdings_snapshot
+            WHERE portfolio_id = %(portfolio_id)s
+            AND asset_id = %(asset_id)s
+            RETURNING id
+        """, {"portfolio_id": portfolio_id, "asset_id": asset_id})
+        rows = cur.fetchall()
+        conn.commit()
+        return {
+            "success": True,
+            "deleted_count": len(rows),
+            "message": f"已从组合移除 {len(rows)} 条持仓快照"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
+@router.post("/portfolio/{portfolio_id}/asset/{asset_id}/move_to_default")
+def move_holding_to_default(portfolio_id: int, asset_id: int):
+    """将某组合下的资产持仓快照转移到默认组合（不影响总览）"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # 1. 获取该组合该资产的最新快照
+        cur.execute("""
+            SELECT snap_date, shares, market_value, cost_value
+            FROM holdings_snapshot
+            WHERE portfolio_id = %(portfolio_id)s
+            AND asset_id = %(asset_id)s
+            ORDER BY snap_date DESC, updated_at DESC
+            LIMIT 1
+        """, {"portfolio_id": portfolio_id, "asset_id": asset_id})
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="未找到该组合下的持仓快照")
+
+        # 2. 获取或创建默认组合
+        default_portfolio_id = _get_or_create_default_portfolio(cur, conn)
+
+        # 3. 写入默认组合（同一日期 upsert）
+        cur.execute("""
+            INSERT INTO holdings_snapshot 
+            (portfolio_id, asset_id, snap_date, shares, market_value, cost_value, source, note)
+            VALUES (%(portfolio_id)s, %(asset_id)s, %(snap_date)s, %(shares)s, %(market_value)s, %(cost_value)s, 'manual', '从组合移入默认组合')
+            ON CONFLICT (portfolio_id, asset_id, snap_date)
+            DO UPDATE SET
+                shares = EXCLUDED.shares,
+                market_value = EXCLUDED.market_value,
+                cost_value = EXCLUDED.cost_value,
+                source = 'manual',
+                note = EXCLUDED.note,
+                updated_at = now()
+        """, {
+            "portfolio_id": default_portfolio_id,
+            "asset_id": asset_id,
+            "snap_date": row["snap_date"],
+            "shares": row["shares"],
+            "market_value": row["market_value"],
+            "cost_value": row["cost_value"],
+        })
+
+        # 4. 删除该组合下该资产的所有快照
+        cur.execute("""
+            DELETE FROM holdings_snapshot
+            WHERE portfolio_id = %(portfolio_id)s
+            AND asset_id = %(asset_id)s
+        """, {"portfolio_id": portfolio_id, "asset_id": asset_id})
+
+        conn.commit()
+        return {
+            "success": True,
+            "message": "已从组合移除并迁移到默认组合（不影响总览）"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/asset/{asset_id}/latest")
+def get_latest_holding_by_asset(asset_id: int):
+    """获取某个资产最新的持仓快照"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        default_portfolio_id = _get_default_portfolio_id(cur)
+        if not default_portfolio_id:
+            raise HTTPException(status_code=404, detail="未找到默认组合")
+        cur.execute("""
+            SELECT
+                portfolio_id,
+                asset_id,
+                snap_date,
+                shares,
+                market_value,
+                cost_value,
+                updated_at
+            FROM holdings_snapshot
+            WHERE asset_id = %(asset_id)s
+            AND portfolio_id = %(portfolio_id)s
+            ORDER BY snap_date DESC, updated_at DESC
+            LIMIT 1
+        """, {"asset_id": asset_id, "portfolio_id": default_portfolio_id})
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="未找到持仓快照")
+        return row
+    finally:
+        cur.close()
+        conn.close()
+
+
+@router.delete("/asset/{asset_id}")
+def delete_holdings_by_asset(asset_id: int):
+    """删除某个资产的所有持仓快照"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            DELETE FROM holdings_snapshot
+            WHERE asset_id = %(asset_id)s
+            RETURNING id
+        """, {"asset_id": asset_id})
+        rows = cur.fetchall()
+        conn.commit()
+        return {
+            "success": True,
+            "deleted_count": len(rows),
+            "message": f"已清理 {len(rows)} 条持仓快照"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
 @router.post("/quick")
 def create_quick_holding(holding: QuickHoldingCreate):
     """快速创建持仓快照（用于添加/编辑资产时）
     
     会自动：
-    1. 找到或创建一个默认组合
+    1. 使用指定组合；未指定则使用默认组合
     2. 创建今日持仓快照
     """
     conn = get_conn()
     cur = conn.cursor()
 
     try:
-        # 1. 查找或创建默认组合
-        cur.execute("""
-            SELECT id FROM portfolios 
-            WHERE name = '默认组合' AND include_in_overall = true
-            LIMIT 1
-        """)
-        portfolio = cur.fetchone()
-
-        if not portfolio:
-            # 创建默认组合
+        # 1. 使用指定组合；未指定则使用默认组合
+        portfolio_id = holding.portfolio_id
+        if portfolio_id:
+            cur.execute("SELECT id FROM portfolios WHERE id = %(id)s", {"id": portfolio_id})
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="组合不存在")
+        else:
             cur.execute("""
-                INSERT INTO portfolios (name, include_in_overall)
-                VALUES ('默认组合', true)
-                RETURNING id
+                SELECT id FROM portfolios 
+                WHERE name = '默认组合' AND include_in_overall = true
+                LIMIT 1
             """)
             portfolio = cur.fetchone()
-            conn.commit()
 
-        portfolio_id = portfolio["id"]
+            if not portfolio:
+                # 创建默认组合
+                cur.execute("""
+                    INSERT INTO portfolios (name, include_in_overall)
+                    VALUES ('默认组合', true)
+                    RETURNING id
+                """)
+                portfolio = cur.fetchone()
+                conn.commit()
+
+            portfolio_id = portfolio["id"]
 
         # 2. 检查资产是否存在
         cur.execute("SELECT id FROM assets WHERE id = %(id)s", {"id": holding.asset_id})

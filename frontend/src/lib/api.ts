@@ -239,6 +239,29 @@ export async function getPortfoliosStats(): Promise<{
   return res.json();
 }
 
+// 获取组合持仓明细
+export interface PortfolioHolding {
+  asset_id: number;
+  code: string;
+  name: string;
+  market: string;
+  bucket: string;
+  subclass: string;
+  shares: number;
+  market_value: number;
+  cost_value: number;
+  pnl: number;
+  return_rate: number;
+}
+
+export async function getPortfolioHoldings(portfolioId: number): Promise<PortfolioHolding[]> {
+  const res = await fetch(`${API_BASE}/portfolios/${portfolioId}/holdings`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 // ============ Overall API ============
 
 export interface OverallStats {
@@ -286,6 +309,7 @@ export async function getOverallHoldings(): Promise<OverallHolding[]> {
 // ============ Holdings API ============
 
 export interface QuickHoldingCreate {
+  portfolio_id?: number;
   asset_id: number;
   shares?: number;
   market_value: number;
@@ -303,6 +327,75 @@ export async function createQuickHolding(data: QuickHoldingCreate): Promise<{
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface LatestHoldingSnapshot {
+  portfolio_id: number;
+  asset_id: number;
+  snap_date: string;
+  shares?: number | null;
+  market_value: number;
+  cost_value?: number | null;
+  updated_at: string;
+}
+
+// 获取资产最新持仓快照
+export async function getLatestHoldingByAsset(assetId: number): Promise<LatestHoldingSnapshot> {
+  const res = await fetch(`${API_BASE}/holdings/asset/${assetId}/latest`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// 删除某个资产的持仓快照
+export async function deleteHoldingsByAsset(assetId: number): Promise<{
+  success: boolean;
+  deleted_count: number;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/holdings/asset/${assetId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// 仅删除某组合下某资产的持仓快照
+export async function deleteHoldingsByPortfolioAsset(portfolioId: number, assetId: number): Promise<{
+  success: boolean;
+  deleted_count: number;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/holdings/portfolio/${portfolioId}/asset/${assetId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// 将持仓从组合移到默认组合（不影响总览）
+export async function moveHoldingToDefault(portfolioId: number, assetId: number): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/holdings/portfolio/${portfolioId}/asset/${assetId}/move_to_default`, {
+    method: "POST",
   });
   if (!res.ok) {
     const err = await res.json();
@@ -347,6 +440,22 @@ export async function quickBuy(data: QuickBuyRequest): Promise<QuickBuyResponse>
   return res.json();
 }
 
+// 删除某个资产的交易记录（谨慎使用）
+export async function deleteTradesByAsset(assetId: number): Promise<{
+  success: boolean;
+  deleted_count: number;
+  message: string;
+}> {
+  const res = await fetch(`${API_BASE}/trades/asset/${assetId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ============ Position Import API ============
 
 export interface PositionImportRequest {
@@ -364,8 +473,8 @@ export interface PositionImportResponse {
   current_value: number;
   profit_loss: number;
   cost_value: number;
-  shares: number;
-  nav: number;
+  shares: number | null;
+  nav: number | null;
   message: string;
 }
 

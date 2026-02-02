@@ -79,7 +79,7 @@ export default function DashboardPage() {
     setShowModal(true);
   };
 
-  const handleSave = async (data: { name: string; include_in_overall: boolean }) => {
+  const handleSave = async (data: { name: string }) => {
     setSaving(true);
     try {
       if (editingPortfolio) {
@@ -163,10 +163,10 @@ export default function DashboardPage() {
             subtitle="已创建的投资组合"
           />
           <StatCard
-            title="已启用组合"
-            value={stats.enabled_portfolios}
+            title="组合数量"
+            value={stats.total_portfolios}
             icon="✅"
-            subtitle="计入整体统计"
+            subtitle="用于策略与分类"
           />
           <StatCard
             title="总资产种类"
@@ -200,75 +200,85 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            <table className="w-full">
+            <table className="w-full table-fixed">
+              <colgroup>
+                <col className="w-[20%]" />
+                <col className="w-[12%]" />
+                <col className="w-[15%]" />
+                <col className="w-[15%]" />
+                <col className="w-[14%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     组合名称
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     资产数量
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     总市值
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     总成本
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     收益
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     收益率
                   </th>
-                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     状态
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    操作
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {portfolios.map((portfolio) => (
-                  <tr key={portfolio.id} className="hover:bg-gray-50 transition-colors">
+                  <tr 
+                    key={portfolio.id} 
+                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    onClick={() => window.location.href = `/dashboard/${portfolio.id}`}
+                  >
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="text-sm font-bold text-gray-900">
+                        <div className="text-sm font-bold text-blue-600 hover:text-blue-700">
                           {portfolio.name}
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600 font-medium">
+                    <td className="px-4 py-4 whitespace-nowrap text-left text-sm text-gray-600 font-medium">
                       {portfolio.asset_count}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-gray-900">
+                    <td className="px-4 py-4 whitespace-nowrap text-left text-sm font-semibold text-gray-900 tabular-nums">
                       {formatCurrency(portfolio.total_value)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">
+                    <td className="px-4 py-4 whitespace-nowrap text-left text-sm text-gray-600 tabular-nums">
                       {formatCurrency(portfolio.total_cost)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold">
+                    <td className="px-4 py-4 whitespace-nowrap text-left text-sm font-semibold">
                       <span
                         className={
-                          portfolio.total_pnl >= 0 ? "text-green-600" : "text-red-600"
+                          portfolio.total_pnl >= 0 ? "text-red-600" : "text-green-600"
                         }
                       >
                         {formatCurrency(portfolio.total_pnl)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                    <td className="px-4 py-4 whitespace-nowrap text-left text-sm">
                       <span
                         className={`font-bold ${
                           portfolio.return_rate >= 0
-                            ? "text-green-600"
-                            : "text-red-600"
+                            ? "text-red-600"
+                            : "text-green-600"
                         }`}
                       >
                         {formatPercent(portfolio.return_rate)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <td className="px-4 py-4 whitespace-nowrap text-left">
                       {portfolio.include_in_overall ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           已启用
@@ -278,26 +288,6 @@ export default function DashboardPage() {
                           已禁用
                         </span>
                       )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                      <button 
-                        className="text-blue-600 hover:text-blue-700 font-medium mr-3 hover:underline"
-                        onClick={() => alert("查看功能开发中")}
-                      >
-                        查看
-                      </button>
-                      <button 
-                        className="text-gray-600 hover:text-gray-700 font-medium mr-3 hover:underline"
-                        onClick={() => handleEdit(portfolio)}
-                      >
-                        编辑
-                      </button>
-                      <button 
-                        className="text-red-600 hover:text-red-700 font-medium hover:underline"
-                        onClick={() => handleDelete(portfolio)}
-                      >
-                        删除
-                      </button>
                     </td>
                   </tr>
                 ))}

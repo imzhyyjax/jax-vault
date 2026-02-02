@@ -9,6 +9,7 @@ from app.schemas.portfolio import (
 )
 
 router = APIRouter(prefix="/portfolios", tags=["Portfolios"])
+SYSTEM_PORTFOLIO_NAME = "默认组合"
 
 
 @router.get("/", response_model=List[PortfolioWithStats])
@@ -44,11 +45,12 @@ def get_portfolios():
             WHERE portfolio_id = p.id
         )
     ) h ON true
+    WHERE p.name != %(system_name)s
     GROUP BY p.id, p.name, p.include_in_overall, p.created_at, p.updated_at
     ORDER BY p.created_at DESC
     """
 
-    cur.execute(sql)
+    cur.execute(sql, {"system_name": SYSTEM_PORTFOLIO_NAME})
     portfolios = cur.fetchall()
 
     cur.close()
@@ -104,6 +106,56 @@ def get_portfolio(portfolio_id: int):
         raise HTTPException(status_code=404, detail="组合不存在")
 
     return portfolio
+
+
+@router.get("/{portfolio_id}/holdings")
+def get_portfolio_holdings(portfolio_id: int):
+    """获取组合持仓明细"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # 先检查组合是否存在
+    cur.execute("SELECT id FROM portfolios WHERE id = %(id)s", {"id": portfolio_id})
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="组合不存在")
+    
+    sql = """
+    SELECT
+        h.asset_id,
+        a.code,
+        a.name,
+        a.market,
+        a.bucket,
+        a.subclass,
+        h.shares,
+        h.market_value,
+        h.cost_value,
+        (h.market_value - h.cost_value) as pnl,
+        CASE 
+            WHEN h.cost_value > 0 
+            THEN ((h.market_value - h.cost_value) / h.cost_value * 100)
+            ELSE 0 
+        END as return_rate
+    FROM holdings_snapshot h
+    JOIN assets a ON h.asset_id = a.id
+    WHERE h.portfolio_id = %(portfolio_id)s
+    AND h.snap_date = (
+        SELECT MAX(snap_date)
+        FROM holdings_snapshot
+        WHERE portfolio_id = %(portfolio_id)s
+    )
+    ORDER BY h.market_value DESC
+    """
+    
+    cur.execute(sql, {"portfolio_id": portfolio_id})
+    holdings = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+    
+    return holdings
 
 
 @router.post("/", response_model=PortfolioResponse, status_code=201)
@@ -259,9 +311,10 @@ def get_portfolios_stats():
             WHERE portfolio_id = p.id
         )
     ) stats ON true
+    WHERE p.name != %(system_name)s
     """
 
-    cur.execute(sql)
+    cur.execute(sql, {"system_name": SYSTEM_PORTFOLIO_NAME})
     stats = cur.fetchone()
 
     cur.close()

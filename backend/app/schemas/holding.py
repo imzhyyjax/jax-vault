@@ -30,6 +30,7 @@ class HoldingResponse(HoldingBase):
 
 class QuickHoldingCreate(BaseModel):
     """快速创建持仓（用于添加/编辑资产时）"""
+    portfolio_id: Optional[int] = None
     asset_id: int
     shares: Optional[float] = None
     market_value: float

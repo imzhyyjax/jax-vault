@@ -1,5 +1,18 @@
 from fastapi import APIRouter
+from datetime import date
 from app.db.session import get_conn
+
+SYSTEM_PORTFOLIO_NAME = "默认组合"
+
+
+def _get_default_portfolio_id(cur):
+    cur.execute("""
+    SELECT id FROM portfolios
+    WHERE name = %(name)s
+    LIMIT 1
+    """, {"name": SYSTEM_PORTFOLIO_NAME})
+    row = cur.fetchone()
+    return row["id"] if row else None
 
 router = APIRouter(prefix="/overall", tags=["Overall"])
 
@@ -10,33 +23,46 @@ def get_overall_stats():
     conn = get_conn()
     cur = conn.cursor()
 
-    # 获取最新持仓快照日期
-    latest_date_sql = """
-    SELECT MAX(snap_date) as latest_date
-    FROM holdings_snapshot h
-    JOIN portfolios p ON p.id = h.portfolio_id
-    WHERE p.include_in_overall = true
-    """
-    cur.execute(latest_date_sql)
-    latest_result = cur.fetchone()
-    latest_date = latest_result["latest_date"] if latest_result else None
+    # 先统计资产管理中持有中的资产数量
+    cur.execute("""
+    SELECT COUNT(*) as holding_count
+    FROM assets
+    WHERE status = 'holding'
+    """)
+    holding_assets_result = cur.fetchone()
+    holding_assets_count = int(holding_assets_result["holding_count"])
+
+    # 获取默认组合的最新持仓快照日期（总览只看默认组合）
+    default_portfolio_id = _get_default_portfolio_id(cur)
+    latest_date = None
+    if default_portfolio_id:
+        cur.execute("""
+        SELECT MAX(snap_date) as latest_date
+        FROM holdings_snapshot
+        WHERE portfolio_id = %(portfolio_id)s
+        """, {"portfolio_id": default_portfolio_id})
+        latest_result = cur.fetchone()
+        latest_date = latest_result["latest_date"] if latest_result else None
 
     if not latest_date:
-        # 没有持仓数据，返回零值
-        cur.close()
-        conn.close()
-        return {
-            "total_value": 0,
-            "total_cost": 0,
-            "total_pnl": 0,
-            "daily_pnl": 0,
-            "return_rate": 0,
-            "asset_count": 0,
-            "portfolio_count": 0,
-            "has_data": False
-        }
+        # 没有持仓快照，但如果资产管理里有持有资产，则仍然显示
+        if holding_assets_count > 0:
+            latest_date = date.today()
+        else:
+            cur.close()
+            conn.close()
+            return {
+                "total_value": 0,
+                "total_cost": 0,
+                "total_pnl": 0,
+                "daily_pnl": 0,
+                "return_rate": 0,
+                "asset_count": 0,
+                "portfolio_count": 0,
+                "has_data": False
+            }
 
-    # 获取整体统计（通过视图）
+    # 获取整体统计（仅默认组合）
     stats_sql = """
     SELECT
         COALESCE(SUM(market_value), 0) as total_value,
@@ -48,29 +74,30 @@ def get_overall_stats():
             ELSE 0 
         END as return_rate,
         COUNT(DISTINCT asset_id) as asset_count
-    FROM v_overall_holdings
-    WHERE snap_date = %(latest_date)s
+    FROM holdings_snapshot
+    WHERE portfolio_id = %(portfolio_id)s
+    AND snap_date = %(latest_date)s
     """
-    
-    cur.execute(stats_sql, {"latest_date": latest_date})
-    stats = cur.fetchone()
+    cur.execute(stats_sql, {"portfolio_id": default_portfolio_id, "latest_date": latest_date})
+    stats = cur.fetchone() or {"total_value": 0, "total_cost": 0, "total_pnl": 0, "return_rate": 0, "asset_count": 0}
 
-    # 获取今日收益（如果有）
+    # 获取今日收益（仅默认组合）
     daily_pnl_sql = """
     SELECT COALESCE(SUM(daily_pnl), 0) as daily_pnl
-    FROM v_overall_pnl
-    WHERE snap_date = %(latest_date)s
+    FROM pnl_snapshot
+    WHERE portfolio_id = %(portfolio_id)s
+    AND snap_date = %(latest_date)s
     """
-    cur.execute(daily_pnl_sql, {"latest_date": latest_date})
-    daily_result = cur.fetchone()
+    cur.execute(daily_pnl_sql, {"portfolio_id": default_portfolio_id, "latest_date": latest_date})
+    daily_result = cur.fetchone() or {"daily_pnl": 0}
 
-    # 获取已启用的组合数量
+    # 获取组合数量（不含默认组合）
     portfolio_count_sql = """
     SELECT COUNT(*) as count
     FROM portfolios
-    WHERE include_in_overall = true
+    WHERE name != %(system_name)s
     """
-    cur.execute(portfolio_count_sql)
+    cur.execute(portfolio_count_sql, {"system_name": SYSTEM_PORTFOLIO_NAME})
     portfolio_result = cur.fetchone()
 
     cur.close()
@@ -82,9 +109,9 @@ def get_overall_stats():
         "total_pnl": float(stats["total_pnl"]),
         "daily_pnl": float(daily_result["daily_pnl"]),
         "return_rate": float(stats["return_rate"]),
-        "asset_count": int(stats["asset_count"]),
+        "asset_count": holding_assets_count,
         "portfolio_count": int(portfolio_result["count"]),
-        "has_data": True,
+        "has_data": holding_assets_count > 0,
         "latest_date": str(latest_date)
     }
 
@@ -95,62 +122,84 @@ def get_overall_holdings():
     conn = get_conn()
     cur = conn.cursor()
 
-    # 获取最新日期
-    latest_date_sql = """
-    SELECT MAX(snap_date) as latest_date
-    FROM holdings_snapshot h
-    JOIN portfolios p ON p.id = h.portfolio_id
-    WHERE p.include_in_overall = true
-    """
-    cur.execute(latest_date_sql)
-    latest_result = cur.fetchone()
-    latest_date = latest_result["latest_date"] if latest_result else None
+    # 获取资产管理里持有中的资产
+    cur.execute("""
+    SELECT id, code, name, market, bucket, subclass
+    FROM assets
+    WHERE status = 'holding'
+    ORDER BY created_at DESC
+    """)
+    holding_assets = cur.fetchall()
+
+    # 获取默认组合的最新日期
+    default_portfolio_id = _get_default_portfolio_id(cur)
+    latest_date = None
+    if default_portfolio_id:
+        cur.execute("""
+        SELECT MAX(snap_date) as latest_date
+        FROM holdings_snapshot
+        WHERE portfolio_id = %(portfolio_id)s
+        """, {"portfolio_id": default_portfolio_id})
+        latest_result = cur.fetchone()
+        latest_date = latest_result["latest_date"] if latest_result else None
 
     if not latest_date:
-        cur.close()
-        conn.close()
-        return []
+        # 如果没有快照，但资产管理里有持有资产，也要展示
+        if holding_assets:
+            latest_date = date.today()
+        else:
+            cur.close()
+            conn.close()
+            return []
 
     # 先获取总市值（用于计算占比）
     total_value_sql = """
     SELECT COALESCE(SUM(market_value), 0) as total_value
-    FROM v_overall_holdings
-    WHERE snap_date = %(latest_date)s
+    FROM holdings_snapshot
+    WHERE portfolio_id = %(portfolio_id)s
+    AND snap_date = %(latest_date)s
     """
-    cur.execute(total_value_sql, {"latest_date": latest_date})
+    cur.execute(total_value_sql, {"portfolio_id": default_portfolio_id, "latest_date": latest_date})
     total_value_result = cur.fetchone()
     total_value = float(total_value_result["total_value"])
 
-    # 获取整体持仓（聚合后，带占比）
+    # 获取整体持仓（包含资产管理里持有中的资产）
     sql = """
     SELECT
-        h.asset_id,
+        a.id as asset_id,
         a.code,
         a.name,
         a.market,
         a.bucket,
         a.subclass,
         h.shares,
-        h.market_value,
-        h.cost_value,
-        h.market_value - h.cost_value as pnl,
+        COALESCE(h.market_value, 0) as market_value,
+        COALESCE(h.cost_value, 0) as cost_value,
+        COALESCE(h.market_value, 0) - COALESCE(h.cost_value, 0) as pnl,
         CASE 
-            WHEN h.cost_value > 0 
-            THEN ((h.market_value - h.cost_value) / h.cost_value * 100)
+            WHEN COALESCE(h.cost_value, 0) > 0 
+            THEN ((COALESCE(h.market_value, 0) - COALESCE(h.cost_value, 0)) / COALESCE(h.cost_value, 0) * 100)
             ELSE 0 
         END as return_rate,
         CASE 
             WHEN %(total_value)s > 0 
-            THEN (h.market_value / %(total_value)s * 100)
+            THEN (COALESCE(h.market_value, 0) / %(total_value)s * 100)
             ELSE 0 
         END as weight_pct
-    FROM v_overall_holdings h
-    JOIN assets a ON a.id = h.asset_id
-    WHERE h.snap_date = %(latest_date)s
-    ORDER BY h.market_value DESC
+    FROM assets a
+    LEFT JOIN holdings_snapshot h
+      ON h.asset_id = a.id
+      AND h.snap_date = %(latest_date)s
+      AND h.portfolio_id = %(portfolio_id)s
+    WHERE a.status = 'holding'
+    ORDER BY COALESCE(h.market_value, 0) DESC, a.created_at DESC
     """
 
-    cur.execute(sql, {"latest_date": latest_date, "total_value": total_value})
+    cur.execute(sql, {
+        "latest_date": latest_date,
+        "total_value": total_value,
+        "portfolio_id": default_portfolio_id
+    })
     holdings = cur.fetchall()
 
     cur.close()

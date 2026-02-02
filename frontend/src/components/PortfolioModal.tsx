@@ -7,9 +7,8 @@ type PortfolioModalProps = {
   portfolio?: {
     id: number;
     name: string;
-    include_in_overall: boolean;
   } | null;
-  onConfirm: (data: { name: string; include_in_overall: boolean }) => void;
+  onConfirm: (data: { name: string }) => void;
   onCancel: () => void;
 };
 
@@ -19,12 +18,10 @@ export default function PortfolioModal({
   onCancel,
 }: PortfolioModalProps) {
   const [name, setName] = useState("");
-  const [includeInOverall, setIncludeInOverall] = useState(true);
 
   useEffect(() => {
     if (portfolio) {
       setName(portfolio.name);
-      setIncludeInOverall(portfolio.include_in_overall);
     }
   }, [portfolio]);
 
@@ -33,7 +30,7 @@ export default function PortfolioModal({
       alert("请输入组合名称");
       return;
     }
-    onConfirm({ name: name.trim(), include_in_overall: includeInOverall });
+    onConfirm({ name: name.trim() });
   };
 
   const isEdit = !!portfolio;
@@ -69,36 +66,6 @@ export default function PortfolioModal({
             <p className="text-xs text-gray-500 mt-2">
               {name.length}/50 字符
             </p>
-          </div>
-
-          {/* 计入整体统计 */}
-          <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-5 border-2 border-purple-200">
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0 mt-1">
-                <button
-                  onClick={() => setIncludeInOverall(!includeInOverall)}
-                  className={`w-12 h-6 rounded-full transition-all duration-200 relative ${
-                    includeInOverall
-                      ? "bg-gradient-to-r from-purple-600 to-violet-600"
-                      : "bg-gray-300"
-                  }`}
-                >
-                  <div
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${
-                      includeInOverall ? "transform translate-x-6" : ""
-                    }`}
-                  />
-                </button>
-              </div>
-              <div className="flex-1">
-                <div className="font-semibold text-gray-900 mb-1">
-                  计入整体统计
-                </div>
-                <p className="text-sm text-gray-600">
-                  启用后，此组合的持仓和收益将计入首页的整体统计数据
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* 提示信息 */}

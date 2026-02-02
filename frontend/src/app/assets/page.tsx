@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import Button from "@/components/Button";
 import EditAssetModal from "@/components/EditAssetModal";
-import { getAssets, getAssetsStats, deleteAsset, updateAsset, quickBuy, getBatchEstimates, type Asset, type AssetStats, type FundEstimate } from "@/lib/api";
+import { getAssets, getAssetsStats, deleteAsset, updateAsset, quickBuy, getBatchEstimates, deleteHoldingsByAsset, deleteTradesByAsset, type Asset, type AssetStats, type FundEstimate } from "@/lib/api";
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -15,6 +15,9 @@ export default function AssetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Asset | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [clearingHoldings, setClearingHoldings] = useState(false);
+  const [clearingTrades, setClearingTrades] = useState(false);
 
   // 编辑相关
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
@@ -170,6 +173,7 @@ export default function AssetsPage() {
   // 删除资产
   const handleDelete = async (asset: Asset) => {
     setDeleteConfirm(asset);
+    setDeleteError(null);
   };
 
   const confirmDelete = async () => {
@@ -179,11 +183,42 @@ export default function AssetsPage() {
     try {
       await deleteAsset(deleteConfirm.id);
       setDeleteConfirm(null);
+      setDeleteError(null);
       loadData(); // 重新加载数据
     } catch (e: any) {
-      alert(e.message || "删除失败");
+      setDeleteError(e.message || "删除失败");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const clearHoldings = async () => {
+    if (!deleteConfirm) return;
+    setClearingHoldings(true);
+    try {
+      const result = await deleteHoldingsByAsset(deleteConfirm.id);
+      alert(`✅ ${result.message}`);
+      setDeleteError(null);
+      loadData();
+    } catch (e: any) {
+      alert(e.message || "清理持仓失败");
+    } finally {
+      setClearingHoldings(false);
+    }
+  };
+
+  const clearTrades = async () => {
+    if (!deleteConfirm) return;
+    setClearingTrades(true);
+    try {
+      const result = await deleteTradesByAsset(deleteConfirm.id);
+      alert(`✅ ${result.message}`);
+      setDeleteError(null);
+      loadData();
+    } catch (e: any) {
+      alert(e.message || "清理交易失败");
+    } finally {
+      setClearingTrades(false);
     }
   };
 
@@ -480,6 +515,27 @@ export default function AssetsPage() {
               <p className="text-sm text-red-600 mt-4">
                 ⚠️ 注意：如果该资产有关联的持仓或交易记录，将无法删除
               </p>
+              {deleteError && (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                  <div className="text-sm text-red-700 whitespace-pre-wrap">{deleteError}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={clearHoldings}
+                      disabled={clearingHoldings || clearingTrades}
+                    >
+                      {clearingHoldings ? "清理持仓中..." : "清理持仓记录"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={clearTrades}
+                      disabled={clearingHoldings || clearingTrades}
+                    >
+                      {clearingTrades ? "清理交易中..." : "清理交易记录"}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end rounded-b-2xl">
               <Button 

@@ -13,6 +13,32 @@ from app.schemas.position_import import PositionImportRequest, PositionImportRes
 router = APIRouter(prefix="/trades", tags=["Trades"])
 
 
+@router.delete("/asset/{asset_id}")
+def delete_trades_by_asset(asset_id: int):
+    """删除某个资产的所有交易记录（谨慎使用）"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            DELETE FROM trades
+            WHERE asset_id = %(asset_id)s
+            RETURNING id
+        """, {"asset_id": asset_id})
+        rows = cur.fetchall()
+        conn.commit()
+        return {
+            "success": True,
+            "deleted_count": len(rows),
+            "message": f"已清理 {len(rows)} 条交易记录"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+
+
 @router.post("/import_position")
 def import_position(req: PositionImportRequest):
     """导入持仓：根据当前市值和收益反推成本和份额
@@ -76,24 +102,25 @@ def import_position(req: PositionImportRequest):
         """, {"asset_id": req.asset_id})
         
         price_row = cur.fetchone()
+        nav = None
+        shares = None
         if not price_row:
-            print(f"   ❌ 未找到价格数据")
-            raise HTTPException(
-                status_code=404,
-                detail=f"未找到该资产的净值数据，请先导入价格数据"
-            )
-        
-        nav = float(price_row["nav"])
-        print(f"   ✅ 最新净值: {nav} (日期: {price_row['price_date']})")
+            print(f"   ⚠️ 未找到价格数据，将先保存持仓快照（不计算份额）")
+        else:
+            nav = float(price_row["nav"])
+            print(f"   ✅ 最新净值: {nav} (日期: {price_row['price_date']})")
+            shares = req.current_value / nav  # 份额 = 市值 / 净值
         
         # 4. 计算成本和份额
         print(f"\n🧮 步骤4: 计算成本和份额")
         cost_value = req.current_value - req.profit_loss  # 成本 = 市值 - 收益
-        shares = req.current_value / nav  # 份额 = 市值 / 净值
         print(f"   持仓金额: ¥{req.current_value:,.2f}")
         print(f"   持有收益: ¥{req.profit_loss:,.2f}")
         print(f"   → 计算成本: ¥{cost_value:,.2f}")
-        print(f"   → 计算份额: {shares:,.2f}")
+        if shares is not None:
+            print(f"   → 计算份额: {shares:,.2f}")
+        else:
+            print(f"   → 计算份额: 暂无（缺少净值数据）")
         
         # 5. 创建或更新今日持仓快照
         print(f"\n💾 步骤5: 保存持仓快照")
@@ -128,7 +155,10 @@ def import_position(req: PositionImportRequest):
         
         print(f"\n🎉 [导入持仓] 处理成功!")
         print(f"   资产: {asset['name']}")
-        print(f"   份额: {round(shares, 2)}")
+        if shares is not None:
+            print(f"   份额: {round(shares, 2)}")
+        else:
+            print(f"   份额: 暂无（缺少净值数据）")
         print(f"   市值: ¥{req.current_value:,.2f}")
         print(f"   成本: ¥{cost_value:,.2f}")
         print(f"   收益: ¥{req.profit_loss:,.2f}")
@@ -141,9 +171,13 @@ def import_position(req: PositionImportRequest):
             current_value=req.current_value,
             profit_loss=req.profit_loss,
             cost_value=cost_value,
-            shares=round(shares, 2),
+            shares=round(shares, 2) if shares is not None else None,
             nav=nav,
-            message=f"成功导入 {asset['name']} 的持仓，份额：{round(shares, 2)}"
+            message=(
+                f"成功导入 {asset['name']} 的持仓，份额：{round(shares, 2)}"
+                if shares is not None
+                else f"成功导入 {asset['name']} 的持仓（缺少净值，份额待补）"
+            )
         )
         
     except HTTPException:

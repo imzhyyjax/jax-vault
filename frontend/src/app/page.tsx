@@ -431,7 +431,17 @@ export default function HomePage() {
           </div>
           
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full table-fixed">
+              <colgroup>
+                <col className="w-[30%]" />
+                <col className="w-[8%]" />
+                <col className="w-[11%]" />
+                <col className="w-[6%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[8%]" />
+                <col className="w-[15%]" />
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -440,22 +450,22 @@ export default function HomePage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     代码
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                     市值
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
                     占比
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     成本
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     收益
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     收益率
                   </th>
-                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     日内估值
                   </th>
                 </tr>
@@ -493,32 +503,32 @@ export default function HomePage() {
                         <td className="px-6 py-4 whitespace-nowrap font-mono text-sm text-gray-600">
                           {holding.code}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right font-bold text-gray-900">
+                        <td className="px-4 py-4 whitespace-nowrap text-left font-bold text-gray-900 tabular-nums">
                           {formatCurrency(holding.market_value)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <td className="px-4 py-4 whitespace-nowrap text-left tabular-nums">
                           <span className="text-sm font-semibold text-purple-600">
                             {percentage.toFixed(1)}%
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-gray-600 font-medium">
+                        <td className="px-4 py-4 whitespace-nowrap text-left text-gray-600 font-medium">
                           {formatCurrency(holding.cost_value)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right font-bold">
-                          <span className={holding.pnl >= 0 ? "text-green-600" : "text-red-600"}>
+                        <td className="px-4 py-4 whitespace-nowrap text-left font-bold">
+                          <span className={holding.pnl >= 0 ? "text-red-600" : "text-green-600"}>
                             {formatCurrency(holding.pnl)}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <td className="px-4 py-4 whitespace-nowrap text-left">
                           <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold ${
                             holding.return_rate >= 0 
-                              ? "bg-green-100 text-green-700" 
-                              : "bg-red-100 text-red-700"
+                              ? "bg-red-100 text-red-700" 
+                              : "bg-green-100 text-green-700"
                           }`}>
                             {formatPercent(holding.return_rate)}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                        <td className="px-4 py-4 whitespace-nowrap text-left text-sm">
                           {(() => {
                             const estimate = estimates.get(holding.asset_id);
                             if (estimatesLoading) {
@@ -528,7 +538,7 @@ export default function HomePage() {
                               const isPositive = estimate.estimate_change_pct >= 0;
                               const dailyPnl = holding.market_value * (estimate.estimate_change_pct / 100);
                               return (
-                                <div className="flex flex-col items-center">
+                                <div className="flex flex-col items-start">
                                   <span className={`font-bold ${isPositive ? 'text-red-600' : 'text-green-600'}`}>
                                     {isPositive ? '↗' : '↘'} {estimate.estimate_change_pct.toFixed(2)}%
                                   </span>
