@@ -1,0 +1,141 @@
+@import "tailwindcss";
+@reference "tailwindcss";
+
+/* ============ Base Reset ============ */
+html,
+body {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: #f9fafb; /* gray-50 */
+  color: #111827; /* gray-900 */
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+}
+
+/* Prevent iOS font zoom */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ============ Scrollbar (Webkit) ============ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* ============ Input / Button Unified ============ */
+
+input,
+select,
+textarea {
+  @apply border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none transition;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  @apply border-gray-400 ring-2 ring-gray-200;
+}
+
+button {
+  @apply rounded-lg text-sm font-medium transition;
+}
+
+/* Primary Button */
+.btn-primary {
+  @apply bg-black text-white px-4 py-2 hover:bg-gray-800;
+}
+
+/* Secondary Button */
+.btn-secondary {
+  @apply bg-white border border-gray-200 px-4 py-2 hover:bg-gray-50;
+}
+
+/* Danger Button */
+.btn-danger {
+  @apply bg-red-500 text-white px-4 py-2 hover:bg-red-600;
+}
+
+/* ============ Table Style ============ */
+
+table {
+  @apply w-full border-collapse text-sm;
+}
+
+thead {
+  @apply bg-gray-50;
+}
+
+th {
+  @apply px-4 py-2 text-left font-medium text-gray-600 border-b;
+}
+
+td {
+  @apply px-4 py-2 border-b text-gray-700;
+}
+
+tbody tr:hover {
+  @apply bg-gray-50;
+}
+
+/* ============ Card / Panel ============ */
+
+.card {
+  @apply bg-white rounded-2xl border border-gray-100 shadow-sm p-5;
+}
+
+/* ============ Links ============ */
+
+a:not(.group) {
+  @apply text-blue-600 hover:underline;
+}
+
+/* ============ Code ============ */
+
+code {
+  @apply bg-gray-100 px-1 rounded text-sm font-mono;
+}
+
+/* ============ Toast / Alert Base ============ */
+
+.alert-success {
+  @apply bg-green-50 text-green-700 border border-green-200 p-3 rounded-lg;
+}
+
+.alert-error {
+  @apply bg-red-50 text-red-700 border border-red-200 p-3 rounded-lg;
+}
+
+/* ============ Utility ============ */
+
+.text-muted {
+  @apply text-gray-500;
+}
+
+.section-title {
+  @apply text-xl font-semibold mb-4;
+}
