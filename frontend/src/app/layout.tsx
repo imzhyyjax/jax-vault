@@ -3,8 +3,19 @@ import type { Metadata } from "next";
 import Sidebar from "@/components/Sidebar";
 
 export const metadata: Metadata = {
-  title: "Jax Vault",
-  description: "Personal Quant & Portfolio System",
+  title: "JAX-VAULT",
+  description: "个人量化投资与组合管理系统",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "JAX-VAULT",
+  },
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+  },
 };
 
 export default function RootLayout({

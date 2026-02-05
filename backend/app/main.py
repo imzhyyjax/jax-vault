@@ -1,6 +1,6 @@
 import os
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import universe, assets, portfolios, overall, trades, holdings, prices, system, estimates
 
@@ -24,6 +24,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# API 安全验证中间件（可选，用于生产环境）
+API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
+
+async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+    """
+    验证 API 密钥（仅在设置了 API_SECRET_KEY 环境变量时启用）
+    本地开发时不设置此变量，部署到生产环境时设置
+    """
+    # 如果没有设置 API_SECRET_KEY，跳过验证（本地开发）
+    if not API_SECRET_KEY:
+        return True
+    
+    # 生产环境：验证密钥
+    if not x_api_key or x_api_key != API_SECRET_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid or missing API key"
+        )
+    return True
 
 # 注册路由
 app.include_router(universe.router)

@@ -1,6 +1,21 @@
 // API 调用封装
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+
+// 统一的请求头配置
+function getHeaders(): HeadersInit {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
+  
+  // 如果配置了 API Key，添加到请求头
+  if (API_KEY) {
+    headers["X-API-Key"] = API_KEY;
+  }
+  
+  return headers;
+}
 
 // ============ Assets API ============
 
@@ -64,14 +79,20 @@ export async function getAssets(params?: {
   if (params?.limit) query.set("limit", params.limit.toString());
 
   const url = `${API_BASE}/assets/?${query.toString()}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, { 
+    cache: "no-store",
+    headers: getHeaders()
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 // 获取单个资产
 export async function getAsset(id: number): Promise<Asset> {
-  const res = await fetch(`${API_BASE}/assets/${id}`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}/assets/${id}`, { 
+    cache: "no-store",
+    headers: getHeaders()
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -80,7 +101,7 @@ export async function getAsset(id: number): Promise<Asset> {
 export async function createAsset(data: AssetCreate): Promise<Asset> {
   const res = await fetch(`${API_BASE}/assets/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -96,7 +117,7 @@ export async function createAssetFromUniverse(
 ): Promise<Asset> {
   const res = await fetch(`${API_BASE}/assets/from_universe`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -113,7 +134,7 @@ export async function updateAsset(
 ): Promise<Asset> {
   const res = await fetch(`${API_BASE}/assets/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -127,6 +148,7 @@ export async function updateAsset(
 export async function deleteAsset(id: number): Promise<void> {
   const res = await fetch(`${API_BASE}/assets/${id}`, {
     method: "DELETE",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -138,6 +160,7 @@ export async function deleteAsset(id: number): Promise<void> {
 export async function getAssetsStats(): Promise<AssetStats> {
   const res = await fetch(`${API_BASE}/assets/stats/summary`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -168,7 +191,7 @@ export interface PortfolioCreate {
 
 // 获取组合列表
 export async function getPortfolios(): Promise<PortfolioWithStats[]> {
-  const res = await fetch(`${API_BASE}/portfolios/`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}/portfolios/`, { cache: "no-store", headers: getHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -177,6 +200,7 @@ export async function getPortfolios(): Promise<PortfolioWithStats[]> {
 export async function getPortfolio(id: number): Promise<PortfolioWithStats> {
   const res = await fetch(`${API_BASE}/portfolios/${id}`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -188,7 +212,7 @@ export async function createPortfolio(
 ): Promise<Portfolio> {
   const res = await fetch(`${API_BASE}/portfolios/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -205,7 +229,7 @@ export async function updatePortfolio(
 ): Promise<Portfolio> {
   const res = await fetch(`${API_BASE}/portfolios/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -219,6 +243,7 @@ export async function updatePortfolio(
 export async function deletePortfolio(id: number): Promise<void> {
   const res = await fetch(`${API_BASE}/portfolios/${id}`, {
     method: "DELETE",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -234,6 +259,7 @@ export async function getPortfoliosStats(): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/portfolios/stats/summary`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -257,6 +283,7 @@ export interface PortfolioHolding {
 export async function getPortfolioHoldings(portfolioId: number): Promise<PortfolioHolding[]> {
   const res = await fetch(`${API_BASE}/portfolios/${portfolioId}/holdings`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -292,7 +319,7 @@ export interface OverallHolding {
 
 // 获取整体统计
 export async function getOverallStats(): Promise<OverallStats> {
-  const res = await fetch(`${API_BASE}/overall/stats`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}/overall/stats`, { cache: "no-store", headers: getHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -301,6 +328,7 @@ export async function getOverallStats(): Promise<OverallStats> {
 export async function getOverallHoldings(): Promise<OverallHolding[]> {
   const res = await fetch(`${API_BASE}/overall/holdings`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -325,7 +353,7 @@ export async function createQuickHolding(data: QuickHoldingCreate): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/holdings/quick`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -349,6 +377,7 @@ export interface LatestHoldingSnapshot {
 export async function getLatestHoldingByAsset(assetId: number): Promise<LatestHoldingSnapshot> {
   const res = await fetch(`${API_BASE}/holdings/asset/${assetId}/latest`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -365,6 +394,7 @@ export async function deleteHoldingsByAsset(assetId: number): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/holdings/asset/${assetId}`, {
     method: "DELETE",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -381,6 +411,7 @@ export async function deleteHoldingsByPortfolioAsset(portfolioId: number, assetI
 }> {
   const res = await fetch(`${API_BASE}/holdings/portfolio/${portfolioId}/asset/${assetId}`, {
     method: "DELETE",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -396,6 +427,7 @@ export async function moveHoldingToDefault(portfolioId: number, assetId: number)
 }> {
   const res = await fetch(`${API_BASE}/holdings/portfolio/${portfolioId}/asset/${assetId}/move_to_default`, {
     method: "POST",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -430,7 +462,7 @@ export interface QuickBuyResponse {
 export async function quickBuy(data: QuickBuyRequest): Promise<QuickBuyResponse> {
   const res = await fetch(`${API_BASE}/trades/quick_buy`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -448,6 +480,7 @@ export async function deleteTradesByAsset(assetId: number): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/trades/asset/${assetId}`, {
     method: "DELETE",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -482,7 +515,7 @@ export interface PositionImportResponse {
 export async function importPosition(data: PositionImportRequest): Promise<PositionImportResponse> {
   const res = await fetch(`${API_BASE}/trades/import_position`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -520,6 +553,7 @@ export interface BatchEstimateResponse {
 export async function getFundEstimate(assetId: number): Promise<FundEstimate> {
   const res = await fetch(`${API_BASE}/estimates/fund/${assetId}`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
@@ -531,6 +565,7 @@ export async function getFundEstimate(assetId: number): Promise<FundEstimate> {
 export async function getBatchEstimates(assetIds: number[]): Promise<BatchEstimateResponse> {
   const res = await fetch(`${API_BASE}/estimates/batch?asset_ids=${assetIds.join(",")}`, {
     cache: "no-store",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
@@ -542,6 +577,7 @@ export async function getBatchEstimates(assetIds: number[]): Promise<BatchEstima
 export async function clearEstimateCache(): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/estimates/cache/clear`, {
     method: "POST",
+    headers: getHeaders(),
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
