@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 const navItems = [
   { href: "/", label: "总览", icon: "📊", gradient: "from-violet-500 to-purple-500" },
@@ -13,9 +14,36 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-gradient-to-b from-slate-50 to-white border-r border-gray-200 flex flex-col shadow-xl">
+    <>
+      {/* 移动端汉堡菜单按钮 */}
+      <button
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white shadow-lg border border-gray-200"
+      >
+        <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {mobileMenuOpen ? (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          )}
+        </svg>
+      </button>
+
+      {/* 移动端遮罩 */}
+      {mobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* 侧边栏 */}
+      <aside className={`fixed left-0 top-0 h-screen w-64 bg-gradient-to-b from-slate-50 to-white border-r border-gray-200 flex flex-col shadow-xl z-40 transition-transform duration-300 ${
+        mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+      } md:translate-x-0`}>
       {/* Logo */}
       <div className="p-6 border-b border-gray-200 bg-white/50 backdrop-blur-sm">
         <div className="mb-2">
@@ -36,6 +64,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => setMobileMenuOpen(false)}
               className={`
                 group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 no-underline hover:no-underline
                 ${
@@ -71,6 +100,7 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }
 
