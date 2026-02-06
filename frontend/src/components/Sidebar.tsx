@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { clearAuthToken } from "@/lib/auth";
 
 const navItems = [
   { href: "/", label: "总览", icon: "📊", gradient: "from-violet-500 to-purple-500" },
@@ -14,7 +15,12 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  if (pathname === "/login") {
+    return null;
+  }
 
   return (
     <>
@@ -86,16 +92,15 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="p-4 border-t border-gray-200 bg-gradient-to-t from-slate-50 to-transparent">
         <div className="text-xs">
-          <div className="flex items-center justify-between mb-2 bg-white rounded-lg px-3 py-2 shadow-sm">
-            <span className="text-gray-600 font-medium">API 状态</span>
-            <span className="flex items-center gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-              </span>
-              <span className="text-green-600 font-semibold">已连接</span>
-            </span>
-          </div>
+          <button
+            onClick={() => {
+              clearAuthToken();
+              router.replace("/login");
+            }}
+            className="w-full mb-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-600 hover:text-gray-800 hover:border-purple-300"
+          >
+            退出登录
+          </button>
           <div className="text-gray-400 text-center mt-2 font-mono">v0.1.0</div>
         </div>
       </div>

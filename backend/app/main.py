@@ -2,7 +2,7 @@ import os
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import universe, assets, portfolios, overall, trades, holdings, prices, system, estimates
+from app.api import universe, assets, portfolios, overall, trades, holdings, prices, system, estimates, auth
 
 app = FastAPI(
     title="JAX-VAULT API",
@@ -47,6 +47,7 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
 
 # 注册路由
 app.include_router(universe.router)
+app.include_router(auth.router)
 app.include_router(assets.router)
 app.include_router(portfolios.router)
 app.include_router(overall.router)

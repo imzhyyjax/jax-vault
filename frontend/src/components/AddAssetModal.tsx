@@ -20,6 +20,8 @@ type AddAssetModalProps = {
     };
   }) => void;
   onCancel: () => void;
+  error?: string | null;
+  isLoading?: boolean;
 };
 
 const BUCKET_OPTIONS = [
@@ -53,6 +55,8 @@ export default function AddAssetModal({
   fundName,
   onConfirm,
   onCancel,
+  error,
+  isLoading,
 }: AddAssetModalProps) {
   const [bucket, setBucket] = useState<string>("");
   const [subclass, setSubclass] = useState<string>("");
@@ -321,13 +325,33 @@ export default function AddAssetModal({
         </div>
 
         {/* 底部按钮 - 固定 */}
-        <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end flex-shrink-0 border-t border-gray-200">
-          <Button variant="ghost" onClick={onCancel}>
-            取消
-          </Button>
-          <Button variant="primary" onClick={handleSubmit}>
-            确认添加
-          </Button>
+        <div className="bg-gray-50 px-6 py-4 space-y-3 flex-shrink-0 border-t border-gray-200">
+          {/* 错误提示 */}
+          {error && (
+            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <span className="text-red-500 text-lg">⚠️</span>
+                <p className="text-sm text-red-700 font-medium flex-1">{error}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* 按钮 */}
+          <div className="flex gap-3 justify-end">
+            <Button variant="ghost" onClick={onCancel} disabled={isLoading}>
+              取消
+            </Button>
+            <Button variant="primary" onClick={handleSubmit} disabled={isLoading}>
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  添加中...
+                </span>
+              ) : (
+                "确认添加"
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

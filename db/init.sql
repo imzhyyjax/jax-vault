@@ -14,10 +14,22 @@
 -- DROP TABLE IF EXISTS portfolios;
 
 -- =========================
+-- 0) users
+-- =========================
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT now(),
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+-- =========================
 -- 1) portfolios
 -- =========================
 CREATE TABLE IF NOT EXISTS portfolios (
   id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id),
   name TEXT NOT NULL,
   include_in_overall BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT now(),
@@ -54,6 +66,7 @@ ON fund_universe_cn(name);
 CREATE TABLE IF NOT EXISTS assets (
   id SERIAL PRIMARY KEY,
 
+  user_id INT REFERENCES users(id),
   market TEXT NOT NULL CHECK (market IN ('CN','US','HK')),
   code   TEXT NOT NULL,
 
@@ -77,7 +90,7 @@ CREATE TABLE IF NOT EXISTS assets (
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now(),
 
-  UNIQUE (market, code),
+  UNIQUE (user_id, market, code),
 
   CONSTRAINT bucket_subclass_check CHECK (
     (bucket = 'progressive' AND subclass IN ('CN_A','HK_EQ','US_EQ','GLOBAL_EQ'))

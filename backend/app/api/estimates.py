@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 import httpx
 from datetime import datetime, time
@@ -7,6 +7,7 @@ import json
 import re
 from app.db.session import get_conn
 from app.schemas.estimate import FundEstimateResponse, BatchEstimateResponse
+from app.deps import get_current_user
 
 router = APIRouter(prefix="/estimates", tags=["estimates"])
 
@@ -168,7 +169,7 @@ async def fetch_fund_estimate(fund_code: str) -> Optional[dict]:
 
 
 @router.get("/fund/{asset_id}", response_model=FundEstimateResponse)
-async def get_fund_estimate_by_asset(asset_id: int):
+async def get_fund_estimate_by_asset(asset_id: int, current_user=Depends(get_current_user)):
     """
     根据资产ID获取实时估值
     
@@ -193,7 +194,8 @@ async def get_fund_estimate_by_asset(asset_id: int):
             SELECT a.id, a.name, a.code, a.market
             FROM assets a
             WHERE a.id = %s
-        """, (asset_id,))
+            AND a.user_id = %s
+        """, (asset_id, current_user["id"]))
         
         asset = cursor.fetchone()
         if not asset:
@@ -255,6 +257,8 @@ async def get_fund_estimate_by_asset(asset_id: int):
 @router.get("/batch", response_model=BatchEstimateResponse)
 async def get_batch_estimates(
     asset_ids: str = Query(..., description="资产ID列表，逗号分隔，如: 1,2,3")
+    ,
+    current_user=Depends(get_current_user)
 ):
     """
     批量获取多个资产的实时估值
@@ -283,7 +287,7 @@ async def get_batch_estimates(
         raise HTTPException(status_code=400, detail="资产ID列表不能为空")
     
     # 并发查询所有资产
-    tasks = [get_fund_estimate_by_asset(asset_id) for asset_id in id_list]
+    tasks = [get_fund_estimate_by_asset(asset_id, current_user) for asset_id in id_list]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
     estimates = []

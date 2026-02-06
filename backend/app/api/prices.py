@@ -1,25 +1,28 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import date
 from app.db.session import get_conn
 from app.schemas.price import PriceCreate, PriceResponse
+from app.deps import get_current_user
 
 router = APIRouter(prefix="/prices", tags=["Prices"])
 
 
 @router.get("/asset/{asset_id}/latest")
-def get_latest_price(asset_id: int):
+def get_latest_price(asset_id: int, current_user=Depends(get_current_user)):
     """获取某资产的最新净值"""
     conn = get_conn()
     cur = conn.cursor()
     
     try:
         cur.execute("""
-            SELECT id, asset_id, price_date, nav, acc_nav, source, created_at, updated_at
-            FROM prices
-            WHERE asset_id = %(asset_id)s
-            ORDER BY price_date DESC
+            SELECT p.id, p.asset_id, p.price_date, p.nav, p.acc_nav, p.source, p.created_at, p.updated_at
+            FROM prices p
+            JOIN assets a ON a.id = p.asset_id
+            WHERE p.asset_id = %(asset_id)s
+            AND a.user_id = %(user_id)s
+            ORDER BY p.price_date DESC
             LIMIT 1
-        """, {"asset_id": asset_id})
+        """, {"asset_id": asset_id, "user_id": current_user["id"]})
         
         row = cur.fetchone()
         if not row:
@@ -32,7 +35,7 @@ def get_latest_price(asset_id: int):
 
 
 @router.get("/asset/{asset_id}/date/{price_date}")
-def get_price_by_date(asset_id: int, price_date: date):
+def get_price_by_date(asset_id: int, price_date: date, current_user=Depends(get_current_user)):
     """获取某资产在指定日期的净值（如果没有，则返回最近的历史净值）"""
     conn = get_conn()
     cur = conn.cursor()
@@ -40,10 +43,12 @@ def get_price_by_date(asset_id: int, price_date: date):
     try:
         # 先尝试精确匹配
         cur.execute("""
-            SELECT id, asset_id, price_date, nav, acc_nav, source, created_at, updated_at
-            FROM prices
-            WHERE asset_id = %(asset_id)s AND price_date = %(price_date)s
-        """, {"asset_id": asset_id, "price_date": price_date})
+            SELECT p.id, p.asset_id, p.price_date, p.nav, p.acc_nav, p.source, p.created_at, p.updated_at
+            FROM prices p
+            JOIN assets a ON a.id = p.asset_id
+            WHERE p.asset_id = %(asset_id)s AND p.price_date = %(price_date)s
+            AND a.user_id = %(user_id)s
+        """, {"asset_id": asset_id, "price_date": price_date, "user_id": current_user["id"]})
         
         row = cur.fetchone()
         if row:
@@ -51,12 +56,14 @@ def get_price_by_date(asset_id: int, price_date: date):
         
         # 如果没有精确匹配，找最近的历史数据
         cur.execute("""
-            SELECT id, asset_id, price_date, nav, acc_nav, source, created_at, updated_at
-            FROM prices
-            WHERE asset_id = %(asset_id)s AND price_date <= %(price_date)s
-            ORDER BY price_date DESC
+            SELECT p.id, p.asset_id, p.price_date, p.nav, p.acc_nav, p.source, p.created_at, p.updated_at
+            FROM prices p
+            JOIN assets a ON a.id = p.asset_id
+            WHERE p.asset_id = %(asset_id)s AND p.price_date <= %(price_date)s
+            AND a.user_id = %(user_id)s
+            ORDER BY p.price_date DESC
             LIMIT 1
-        """, {"asset_id": asset_id, "price_date": price_date})
+        """, {"asset_id": asset_id, "price_date": price_date, "user_id": current_user["id"]})
         
         row = cur.fetchone()
         if not row:
@@ -72,17 +79,26 @@ def get_price_by_date(asset_id: int, price_date: date):
 
 
 @router.post("/")
-def create_price(price: PriceCreate):
+def create_price(price: PriceCreate, current_user=Depends(get_current_user)):
     """创建或更新价格记录"""
     conn = get_conn()
     cur = conn.cursor()
     
     try:
+        # 检查资产归属
+        cur.execute(
+            "SELECT id FROM assets WHERE id = %(id)s AND user_id = %(user_id)s",
+            {"id": price.asset_id, "user_id": current_user["id"]}
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="资产不存在")
         # 检查是否已存在
         cur.execute("""
-            SELECT id FROM prices
-            WHERE asset_id = %(asset_id)s AND price_date = %(price_date)s
-        """, {"asset_id": price.asset_id, "price_date": price.price_date})
+            SELECT p.id FROM prices p
+            JOIN assets a ON a.id = p.asset_id
+            WHERE p.asset_id = %(asset_id)s AND p.price_date = %(price_date)s
+            AND a.user_id = %(user_id)s
+        """, {"asset_id": price.asset_id, "price_date": price.price_date, "user_id": current_user["id"]})
         
         existing = cur.fetchone()
         

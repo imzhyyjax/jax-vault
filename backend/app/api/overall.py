@@ -1,16 +1,18 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from datetime import date
 from app.db.session import get_conn
+from app.deps import get_current_user
 
 SYSTEM_PORTFOLIO_NAME = "默认组合"
 
 
-def _get_default_portfolio_id(cur):
+def _get_default_portfolio_id(cur, user_id: int):
     cur.execute("""
     SELECT id FROM portfolios
     WHERE name = %(name)s
+    AND user_id = %(user_id)s
     LIMIT 1
-    """, {"name": SYSTEM_PORTFOLIO_NAME})
+    """, {"name": SYSTEM_PORTFOLIO_NAME, "user_id": user_id})
     row = cur.fetchone()
     return row["id"] if row else None
 
@@ -18,7 +20,7 @@ router = APIRouter(prefix="/overall", tags=["Overall"])
 
 
 @router.get("/stats")
-def get_overall_stats():
+def get_overall_stats(current_user=Depends(get_current_user)):
     """获取整体统计数据（首页用）"""
     conn = get_conn()
     cur = conn.cursor()
@@ -28,12 +30,13 @@ def get_overall_stats():
     SELECT COUNT(*) as holding_count
     FROM assets
     WHERE status = 'holding'
-    """)
+    AND user_id = %(user_id)s
+    """, {"user_id": current_user["id"]})
     holding_assets_result = cur.fetchone()
     holding_assets_count = int(holding_assets_result["holding_count"])
 
     # 获取默认组合的最新持仓快照日期（总览只看默认组合）
-    default_portfolio_id = _get_default_portfolio_id(cur)
+    default_portfolio_id = _get_default_portfolio_id(cur, current_user["id"])
     latest_date = None
     if default_portfolio_id:
         cur.execute("""
@@ -96,8 +99,9 @@ def get_overall_stats():
     SELECT COUNT(*) as count
     FROM portfolios
     WHERE name != %(system_name)s
+    AND user_id = %(user_id)s
     """
-    cur.execute(portfolio_count_sql, {"system_name": SYSTEM_PORTFOLIO_NAME})
+    cur.execute(portfolio_count_sql, {"system_name": SYSTEM_PORTFOLIO_NAME, "user_id": current_user["id"]})
     portfolio_result = cur.fetchone()
 
     cur.close()
@@ -117,7 +121,7 @@ def get_overall_stats():
 
 
 @router.get("/holdings")
-def get_overall_holdings():
+def get_overall_holdings(current_user=Depends(get_current_user)):
     """获取整体持仓列表（带资产占比）"""
     conn = get_conn()
     cur = conn.cursor()
@@ -127,12 +131,13 @@ def get_overall_holdings():
     SELECT id, code, name, market, bucket, subclass
     FROM assets
     WHERE status = 'holding'
+    AND user_id = %(user_id)s
     ORDER BY created_at DESC
-    """)
+    """, {"user_id": current_user["id"]})
     holding_assets = cur.fetchall()
 
     # 获取默认组合的最新日期
-    default_portfolio_id = _get_default_portfolio_id(cur)
+    default_portfolio_id = _get_default_portfolio_id(cur, current_user["id"])
     latest_date = None
     if default_portfolio_id:
         cur.execute("""
@@ -192,13 +197,15 @@ def get_overall_holdings():
       AND h.snap_date = %(latest_date)s
       AND h.portfolio_id = %(portfolio_id)s
     WHERE a.status = 'holding'
+    AND a.user_id = %(user_id)s
     ORDER BY COALESCE(h.market_value, 0) DESC, a.created_at DESC
     """
 
     cur.execute(sql, {
         "latest_date": latest_date,
         "total_value": total_value,
-        "portfolio_id": default_portfolio_id
+        "portfolio_id": default_portfolio_id,
+        "user_id": current_user["id"]
     })
     holdings = cur.fetchall()
 

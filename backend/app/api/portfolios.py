@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from app.db.session import get_conn
+from app.deps import get_current_user
 from app.schemas.portfolio import (
     PortfolioCreate,
     PortfolioUpdate,
@@ -13,7 +14,7 @@ SYSTEM_PORTFOLIO_NAME = "默认组合"
 
 
 @router.get("/", response_model=List[PortfolioWithStats])
-def get_portfolios():
+def get_portfolios(current_user=Depends(get_current_user)):
     """获取所有组合列表（带统计信息）"""
     conn = get_conn()
     cur = conn.cursor()
@@ -46,11 +47,12 @@ def get_portfolios():
         )
     ) h ON true
     WHERE p.name != %(system_name)s
+    AND p.user_id = %(user_id)s
     GROUP BY p.id, p.name, p.include_in_overall, p.created_at, p.updated_at
     ORDER BY p.created_at DESC
     """
 
-    cur.execute(sql, {"system_name": SYSTEM_PORTFOLIO_NAME})
+    cur.execute(sql, {"system_name": SYSTEM_PORTFOLIO_NAME, "user_id": current_user["id"]})
     portfolios = cur.fetchall()
 
     cur.close()
@@ -60,7 +62,7 @@ def get_portfolios():
 
 
 @router.get("/{portfolio_id}", response_model=PortfolioWithStats)
-def get_portfolio(portfolio_id: int):
+def get_portfolio(portfolio_id: int, current_user=Depends(get_current_user)):
     """获取单个组合详情"""
     conn = get_conn()
     cur = conn.cursor()
@@ -93,10 +95,11 @@ def get_portfolio(portfolio_id: int):
         )
     ) h ON true
     WHERE p.id = %(portfolio_id)s
+    AND p.user_id = %(user_id)s
     GROUP BY p.id, p.name, p.include_in_overall, p.created_at, p.updated_at
     """
 
-    cur.execute(sql, {"portfolio_id": portfolio_id})
+    cur.execute(sql, {"portfolio_id": portfolio_id, "user_id": current_user["id"]})
     portfolio = cur.fetchone()
 
     cur.close()
@@ -109,13 +112,16 @@ def get_portfolio(portfolio_id: int):
 
 
 @router.get("/{portfolio_id}/holdings")
-def get_portfolio_holdings(portfolio_id: int):
+def get_portfolio_holdings(portfolio_id: int, current_user=Depends(get_current_user)):
     """获取组合持仓明细"""
     conn = get_conn()
     cur = conn.cursor()
     
     # 先检查组合是否存在
-    cur.execute("SELECT id FROM portfolios WHERE id = %(id)s", {"id": portfolio_id})
+    cur.execute(
+        "SELECT id FROM portfolios WHERE id = %(id)s AND user_id = %(user_id)s",
+        {"id": portfolio_id, "user_id": current_user["id"]}
+    )
     if not cur.fetchone():
         cur.close()
         conn.close()
@@ -159,14 +165,14 @@ def get_portfolio_holdings(portfolio_id: int):
 
 
 @router.post("/", response_model=PortfolioResponse, status_code=201)
-def create_portfolio(portfolio: PortfolioCreate):
+def create_portfolio(portfolio: PortfolioCreate, current_user=Depends(get_current_user)):
     """创建组合"""
     conn = get_conn()
     cur = conn.cursor()
 
     # 检查名称是否已存在
-    check_sql = "SELECT id FROM portfolios WHERE name = %(name)s"
-    cur.execute(check_sql, {"name": portfolio.name})
+    check_sql = "SELECT id FROM portfolios WHERE name = %(name)s AND user_id = %(user_id)s"
+    cur.execute(check_sql, {"name": portfolio.name, "user_id": current_user["id"]})
     if cur.fetchone():
         cur.close()
         conn.close()
@@ -174,13 +180,15 @@ def create_portfolio(portfolio: PortfolioCreate):
 
     sql = """
     INSERT INTO portfolios
-    (name, include_in_overall)
+    (user_id, name, include_in_overall)
     VALUES
-    (%(name)s, %(include_in_overall)s)
+    (%(user_id)s, %(name)s, %(include_in_overall)s)
     RETURNING id, name, include_in_overall, created_at, updated_at
     """
 
-    cur.execute(sql, portfolio.model_dump())
+    data = portfolio.model_dump()
+    data["user_id"] = current_user["id"]
+    cur.execute(sql, data)
     new_portfolio = cur.fetchone()
 
     conn.commit()
@@ -191,14 +199,14 @@ def create_portfolio(portfolio: PortfolioCreate):
 
 
 @router.put("/{portfolio_id}", response_model=PortfolioResponse)
-def update_portfolio(portfolio_id: int, portfolio_update: PortfolioUpdate):
+def update_portfolio(portfolio_id: int, portfolio_update: PortfolioUpdate, current_user=Depends(get_current_user)):
     """更新组合"""
     conn = get_conn()
     cur = conn.cursor()
 
     # 检查组合是否存在
-    check_sql = "SELECT id FROM portfolios WHERE id = %(id)s"
-    cur.execute(check_sql, {"id": portfolio_id})
+    check_sql = "SELECT id FROM portfolios WHERE id = %(id)s AND user_id = %(user_id)s"
+    cur.execute(check_sql, {"id": portfolio_id, "user_id": current_user["id"]})
     if not cur.fetchone():
         cur.close()
         conn.close()
@@ -216,10 +224,12 @@ def update_portfolio(portfolio_id: int, portfolio_update: PortfolioUpdate):
         name_check_sql = """
         SELECT id FROM portfolios 
         WHERE name = %(name)s AND id != %(portfolio_id)s
+        AND user_id = %(user_id)s
         """
         cur.execute(name_check_sql, {
             "name": update_data["name"],
-            "portfolio_id": portfolio_id
+            "portfolio_id": portfolio_id,
+            "user_id": current_user["id"]
         })
         if cur.fetchone():
             cur.close()
@@ -232,11 +242,12 @@ def update_portfolio(portfolio_id: int, portfolio_update: PortfolioUpdate):
     sql = f"""
     UPDATE portfolios
     SET {', '.join(set_clauses)}
-    WHERE id = %(portfolio_id)s
+    WHERE id = %(portfolio_id)s AND user_id = %(user_id)s
     RETURNING id, name, include_in_overall, created_at, updated_at
     """
 
     update_data["portfolio_id"] = portfolio_id
+    update_data["user_id"] = current_user["id"]
     cur.execute(sql, update_data)
     updated_portfolio = cur.fetchone()
 
@@ -248,7 +259,7 @@ def update_portfolio(portfolio_id: int, portfolio_update: PortfolioUpdate):
 
 
 @router.delete("/{portfolio_id}", status_code=204)
-def delete_portfolio(portfolio_id: int):
+def delete_portfolio(portfolio_id: int, current_user=Depends(get_current_user)):
     """删除组合"""
     conn = get_conn()
     cur = conn.cursor()
@@ -273,8 +284,8 @@ def delete_portfolio(portfolio_id: int):
         )
 
     # 删除组合
-    delete_sql = "DELETE FROM portfolios WHERE id = %(id)s RETURNING id"
-    cur.execute(delete_sql, {"id": portfolio_id})
+    delete_sql = "DELETE FROM portfolios WHERE id = %(id)s AND user_id = %(user_id)s RETURNING id"
+    cur.execute(delete_sql, {"id": portfolio_id, "user_id": current_user["id"]})
     deleted = cur.fetchone()
 
     if not deleted:
@@ -290,7 +301,7 @@ def delete_portfolio(portfolio_id: int):
 
 
 @router.get("/stats/summary")
-def get_portfolios_stats():
+def get_portfolios_stats(current_user=Depends(get_current_user)):
     """获取组合统计摘要"""
     conn = get_conn()
     cur = conn.cursor()
@@ -312,9 +323,10 @@ def get_portfolios_stats():
         )
     ) stats ON true
     WHERE p.name != %(system_name)s
+    AND p.user_id = %(user_id)s
     """
 
-    cur.execute(sql, {"system_name": SYSTEM_PORTFOLIO_NAME})
+    cur.execute(sql, {"system_name": SYSTEM_PORTFOLIO_NAME, "user_id": current_user["id"]})
     stats = cur.fetchone()
 
     cur.close()

@@ -1,45 +1,54 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import date
 from app.db.session import get_conn
 from app.schemas.holding import QuickHoldingCreate
+from app.deps import get_current_user
 
 router = APIRouter(prefix="/holdings", tags=["Holdings"])
 
 
-def _get_or_create_default_portfolio(cur, conn):
+def _get_or_create_default_portfolio(cur, conn, user_id: int):
     cur.execute("""
         SELECT id FROM portfolios 
         WHERE name = '默认组合' AND include_in_overall = true
+        AND user_id = %(user_id)s
         LIMIT 1
-    """)
+    """, {"user_id": user_id})
     portfolio = cur.fetchone()
     if not portfolio:
         cur.execute("""
-            INSERT INTO portfolios (name, include_in_overall)
-            VALUES ('默认组合', true)
+            INSERT INTO portfolios (user_id, name, include_in_overall)
+            VALUES (%(user_id)s, '默认组合', true)
             RETURNING id
-        """)
+        """, {"user_id": user_id})
         portfolio = cur.fetchone()
         conn.commit()
     return portfolio["id"]
 
 
-def _get_default_portfolio_id(cur):
+def _get_default_portfolio_id(cur, user_id: int):
     cur.execute("""
         SELECT id FROM portfolios 
         WHERE name = '默认组合' AND include_in_overall = true
+        AND user_id = %(user_id)s
         LIMIT 1
-    """)
+    """, {"user_id": user_id})
     row = cur.fetchone()
     return row["id"] if row else None
 
 
 @router.delete("/portfolio/{portfolio_id}/asset/{asset_id}")
-def delete_holdings_by_portfolio_asset(portfolio_id: int, asset_id: int):
+def delete_holdings_by_portfolio_asset(portfolio_id: int, asset_id: int, current_user=Depends(get_current_user)):
     """仅删除某组合下某资产的持仓快照"""
     conn = get_conn()
     cur = conn.cursor()
     try:
+        cur.execute(
+            "SELECT id FROM portfolios WHERE id = %(id)s AND user_id = %(user_id)s",
+            {"id": portfolio_id, "user_id": current_user["id"]}
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="组合不存在")
         cur.execute("""
             DELETE FROM holdings_snapshot
             WHERE portfolio_id = %(portfolio_id)s
@@ -62,11 +71,17 @@ def delete_holdings_by_portfolio_asset(portfolio_id: int, asset_id: int):
 
 
 @router.post("/portfolio/{portfolio_id}/asset/{asset_id}/move_to_default")
-def move_holding_to_default(portfolio_id: int, asset_id: int):
+def move_holding_to_default(portfolio_id: int, asset_id: int, current_user=Depends(get_current_user)):
     """将某组合下的资产持仓快照转移到默认组合（不影响总览）"""
     conn = get_conn()
     cur = conn.cursor()
     try:
+        cur.execute(
+            "SELECT id FROM portfolios WHERE id = %(id)s AND user_id = %(user_id)s",
+            {"id": portfolio_id, "user_id": current_user["id"]}
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="组合不存在")
         # 1. 获取该组合该资产的最新快照
         cur.execute("""
             SELECT snap_date, shares, market_value, cost_value
@@ -81,7 +96,7 @@ def move_holding_to_default(portfolio_id: int, asset_id: int):
             raise HTTPException(status_code=404, detail="未找到该组合下的持仓快照")
 
         # 2. 获取或创建默认组合
-        default_portfolio_id = _get_or_create_default_portfolio(cur, conn)
+        default_portfolio_id = _get_or_create_default_portfolio(cur, conn, current_user["id"])
 
         # 3. 写入默认组合（同一日期 upsert）
         cur.execute("""
@@ -125,12 +140,12 @@ def move_holding_to_default(portfolio_id: int, asset_id: int):
         conn.close()
 
 @router.get("/asset/{asset_id}/latest")
-def get_latest_holding_by_asset(asset_id: int):
+def get_latest_holding_by_asset(asset_id: int, current_user=Depends(get_current_user)):
     """获取某个资产最新的持仓快照"""
     conn = get_conn()
     cur = conn.cursor()
     try:
-        default_portfolio_id = _get_default_portfolio_id(cur)
+        default_portfolio_id = _get_default_portfolio_id(cur, current_user["id"])
         if not default_portfolio_id:
             raise HTTPException(status_code=404, detail="未找到默认组合")
         cur.execute("""
@@ -158,16 +173,19 @@ def get_latest_holding_by_asset(asset_id: int):
 
 
 @router.delete("/asset/{asset_id}")
-def delete_holdings_by_asset(asset_id: int):
+def delete_holdings_by_asset(asset_id: int, current_user=Depends(get_current_user)):
     """删除某个资产的所有持仓快照"""
     conn = get_conn()
     cur = conn.cursor()
     try:
         cur.execute("""
-            DELETE FROM holdings_snapshot
-            WHERE asset_id = %(asset_id)s
-            RETURNING id
-        """, {"asset_id": asset_id})
+            DELETE FROM holdings_snapshot h
+            USING assets a
+            WHERE h.asset_id = a.id
+            AND h.asset_id = %(asset_id)s
+            AND a.user_id = %(user_id)s
+            RETURNING h.id
+        """, {"asset_id": asset_id, "user_id": current_user["id"]})
         rows = cur.fetchall()
         conn.commit()
         return {
@@ -184,7 +202,7 @@ def delete_holdings_by_asset(asset_id: int):
 
 
 @router.post("/quick")
-def create_quick_holding(holding: QuickHoldingCreate):
+def create_quick_holding(holding: QuickHoldingCreate, current_user=Depends(get_current_user)):
     """快速创建持仓快照（用于添加/编辑资产时）
     
     会自动：
@@ -198,31 +216,20 @@ def create_quick_holding(holding: QuickHoldingCreate):
         # 1. 使用指定组合；未指定则使用默认组合
         portfolio_id = holding.portfolio_id
         if portfolio_id:
-            cur.execute("SELECT id FROM portfolios WHERE id = %(id)s", {"id": portfolio_id})
+            cur.execute(
+                "SELECT id FROM portfolios WHERE id = %(id)s AND user_id = %(user_id)s",
+                {"id": portfolio_id, "user_id": current_user["id"]}
+            )
             if not cur.fetchone():
                 raise HTTPException(status_code=404, detail="组合不存在")
         else:
-            cur.execute("""
-                SELECT id FROM portfolios 
-                WHERE name = '默认组合' AND include_in_overall = true
-                LIMIT 1
-            """)
-            portfolio = cur.fetchone()
-
-            if not portfolio:
-                # 创建默认组合
-                cur.execute("""
-                    INSERT INTO portfolios (name, include_in_overall)
-                    VALUES ('默认组合', true)
-                    RETURNING id
-                """)
-                portfolio = cur.fetchone()
-                conn.commit()
-
-            portfolio_id = portfolio["id"]
+            portfolio_id = _get_or_create_default_portfolio(cur, conn, current_user["id"])
 
         # 2. 检查资产是否存在
-        cur.execute("SELECT id FROM assets WHERE id = %(id)s", {"id": holding.asset_id})
+        cur.execute(
+            "SELECT id FROM assets WHERE id = %(id)s AND user_id = %(user_id)s",
+            {"id": holding.asset_id, "user_id": current_user["id"]}
+        )
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="资产不存在")
 

@@ -98,7 +98,7 @@ export default function FundsPage() {
     if (!selectedFund) return;
 
     setAddingAsset(true);
-    setErr(null);
+    setErr(null); // 清空模态框内的错误
 
     try {
       // 1. 添加资产
@@ -150,9 +150,12 @@ export default function FundsPage() {
         setSuccessMsg(`成功添加 ${selectedFund.name} 到资产字典！`);
       }
 
+      // 成功后关闭模态框并显示成功消息
       setShowModal(false);
+      setSelectedFund(null);
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (e: any) {
+      // 出错时不关闭模态框，在模态框内显示错误
       setErr(e?.message || "添加失败");
     } finally {
       setAddingAsset(false);
@@ -173,9 +176,9 @@ export default function FundsPage() {
             <span className="text-2xl">🔍</span>
             <span className="text-gray-400 text-sm font-medium">输入基金代码或名称（例如：纳指、513100）</span>
           </div>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
             className="w-full pl-5 pr-4 py-4 border-2 border-gray-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white shadow-sm hover:shadow-md transition-all"
           />
         </div>
@@ -303,20 +306,22 @@ export default function FundsPage() {
           fundCode={selectedFund.code}
           fundName={selectedFund.name}
           onConfirm={handleConfirmAdd}
-          onCancel={() => setShowModal(false)}
+          onCancel={() => {
+            setShowModal(false);
+            setSelectedFund(null);
+            setErr(null);
+          }}
+          error={err}
+          isLoading={addingAsset}
         />
       )}
 
-      {/* 加载遮罩 */}
-      {addingAsset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-8 shadow-2xl">
-            <div className="flex items-center gap-4">
-              <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-lg font-semibold text-gray-900">
-                正在添加资产...
-              </span>
-            </div>
+      {/* 成功提示 */}
+      {successMsg && (
+        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">✅</span>
+            <span className="font-medium">{successMsg}</span>
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from app.db.session import get_conn
+from app.deps import get_current_user
 from app.schemas.trade import (
     TradeCreate,
     TradeUpdate,
@@ -13,17 +14,41 @@ from app.schemas.position_import import PositionImportRequest, PositionImportRes
 router = APIRouter(prefix="/trades", tags=["Trades"])
 
 
+def _get_or_create_default_portfolio(cur, conn, user_id: int):
+    cur.execute("""
+        SELECT id FROM portfolios 
+        WHERE name = '默认组合' AND include_in_overall = true
+        AND user_id = %(user_id)s
+        LIMIT 1
+    """, {"user_id": user_id})
+    portfolio = cur.fetchone()
+
+    if not portfolio:
+        cur.execute("""
+            INSERT INTO portfolios (user_id, name, include_in_overall)
+            VALUES (%(user_id)s, '默认组合', true)
+            RETURNING id
+        """, {"user_id": user_id})
+        portfolio = cur.fetchone()
+        conn.commit()
+
+    return portfolio["id"]
+
+
 @router.delete("/asset/{asset_id}")
-def delete_trades_by_asset(asset_id: int):
+def delete_trades_by_asset(asset_id: int, current_user=Depends(get_current_user)):
     """删除某个资产的所有交易记录（谨慎使用）"""
     conn = get_conn()
     cur = conn.cursor()
     try:
         cur.execute("""
-            DELETE FROM trades
-            WHERE asset_id = %(asset_id)s
-            RETURNING id
-        """, {"asset_id": asset_id})
+            DELETE FROM trades t
+            USING assets a
+            WHERE t.asset_id = a.id
+            AND t.asset_id = %(asset_id)s
+            AND a.user_id = %(user_id)s
+            RETURNING t.id
+        """, {"asset_id": asset_id, "user_id": current_user["id"]})
         rows = cur.fetchall()
         conn.commit()
         return {
@@ -40,7 +65,7 @@ def delete_trades_by_asset(asset_id: int):
 
 
 @router.post("/import_position")
-def import_position(req: PositionImportRequest):
+def import_position(req: PositionImportRequest, current_user=Depends(get_current_user)):
     """导入持仓：根据当前市值和收益反推成本和份额
     
     流程：
@@ -68,26 +93,13 @@ def import_position(req: PositionImportRequest):
         print("\n📁 步骤1: 确定投资组合")
         portfolio_id = req.portfolio_id
         if not portfolio_id:
-            cur.execute("""
-                SELECT id FROM portfolios 
-                WHERE name = '默认组合' AND include_in_overall = true
-                LIMIT 1
-            """)
-            portfolio = cur.fetchone()
-            
-            if not portfolio:
-                cur.execute("""
-                    INSERT INTO portfolios (name, include_in_overall)
-                    VALUES ('默认组合', true)
-                    RETURNING id
-                """)
-                portfolio = cur.fetchone()
-                conn.commit()
-            
-            portfolio_id = portfolio["id"]
+            portfolio_id = _get_or_create_default_portfolio(cur, conn, current_user["id"])
         
         # 2. 检查资产是否存在
-        cur.execute("SELECT id, code, name FROM assets WHERE id = %(id)s", {"id": req.asset_id})
+        cur.execute(
+            "SELECT id, code, name FROM assets WHERE id = %(id)s AND user_id = %(user_id)s",
+            {"id": req.asset_id, "user_id": current_user["id"]}
+        )
         asset = cur.fetchone()
         if not asset:
             raise HTTPException(status_code=404, detail="资产不存在")
@@ -192,7 +204,7 @@ def import_position(req: PositionImportRequest):
 
 
 @router.post("/quick_buy")
-def quick_buy(req: QuickBuyRequest):
+def quick_buy(req: QuickBuyRequest, current_user=Depends(get_current_user)):
     """快速买入：根据买入金额和日期自动创建交易记录
     
     流程：
@@ -215,26 +227,13 @@ def quick_buy(req: QuickBuyRequest):
         # 1. 确定组合
         portfolio_id = req.portfolio_id
         if not portfolio_id:
-            cur.execute("""
-                SELECT id FROM portfolios 
-                WHERE name = '默认组合' AND include_in_overall = true
-                LIMIT 1
-            """)
-            portfolio = cur.fetchone()
-            
-            if not portfolio:
-                cur.execute("""
-                    INSERT INTO portfolios (name, include_in_overall)
-                    VALUES ('默认组合', true)
-                    RETURNING id
-                """)
-                portfolio = cur.fetchone()
-                conn.commit()
-            
-            portfolio_id = portfolio["id"]
+            portfolio_id = _get_or_create_default_portfolio(cur, conn, current_user["id"])
         
         # 2. 检查资产是否存在
-        cur.execute("SELECT id, code, name FROM assets WHERE id = %(id)s", {"id": req.asset_id})
+        cur.execute(
+            "SELECT id, code, name FROM assets WHERE id = %(id)s AND user_id = %(user_id)s",
+            {"id": req.asset_id, "user_id": current_user["id"]}
+        )
         asset = cur.fetchone()
         if not asset:
             raise HTTPException(status_code=404, detail="资产不存在")
@@ -374,15 +373,16 @@ def get_trades(
     start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     side: Optional[str] = Query(None, description="筛选方向: buy/sell"),
-    limit: int = Query(100, le=500)
+    limit: int = Query(100, le=500),
+    current_user=Depends(get_current_user)
 ):
     """获取交易记录列表"""
     conn = get_conn()
     cur = conn.cursor()
 
     # 构建查询条件
-    where_clauses = ["t.is_valid = true"]  # 默认只显示有效交易
-    params = {}
+    where_clauses = ["t.is_valid = true", "p.user_id = %(user_id)s"]
+    params = {"user_id": current_user["id"]}
 
     if portfolio_id:
         where_clauses.append("t.portfolio_id = %(portfolio_id)s")
@@ -434,7 +434,7 @@ def get_trades(
 
 
 @router.get("/{trade_id}", response_model=TradeWithDetails)
-def get_trade(trade_id: int):
+def get_trade(trade_id: int, current_user=Depends(get_current_user)):
     """获取单条交易记录"""
     conn = get_conn()
     cur = conn.cursor()
@@ -452,9 +452,10 @@ def get_trade(trade_id: int):
     JOIN assets a ON a.id = t.asset_id
     JOIN portfolios p ON p.id = t.portfolio_id
     WHERE t.id = %(trade_id)s
+    AND p.user_id = %(user_id)s
     """
 
-    cur.execute(sql, {"trade_id": trade_id})
+    cur.execute(sql, {"trade_id": trade_id, "user_id": current_user["id"]})
     row = cur.fetchone()
 
     cur.close()
@@ -467,7 +468,7 @@ def get_trade(trade_id: int):
 
 
 @router.post("/", response_model=TradeResponse, status_code=201)
-def create_trade(trade: TradeCreate):
+def create_trade(trade: TradeCreate, current_user=Depends(get_current_user)):
     """创建交易记录"""
     conn = get_conn()
     cur = conn.cursor()
@@ -475,12 +476,13 @@ def create_trade(trade: TradeCreate):
     # 验证组合和资产存在
     check_sql = """
     SELECT 
-        (SELECT COUNT(*) FROM portfolios WHERE id = %(portfolio_id)s) as p_exists,
-        (SELECT COUNT(*) FROM assets WHERE id = %(asset_id)s) as a_exists
+        (SELECT COUNT(*) FROM portfolios WHERE id = %(portfolio_id)s AND user_id = %(user_id)s) as p_exists,
+        (SELECT COUNT(*) FROM assets WHERE id = %(asset_id)s AND user_id = %(user_id)s) as a_exists
     """
     cur.execute(check_sql, {
         "portfolio_id": trade.portfolio_id,
-        "asset_id": trade.asset_id
+        "asset_id": trade.asset_id,
+        "user_id": current_user["id"]
     })
     check_result = cur.fetchone()
 

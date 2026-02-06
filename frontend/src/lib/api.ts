@@ -1,6 +1,65 @@
 // API 调用封装
+import { getAuthToken, clearAuthToken } from "@/lib/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001";
+
+const baseFetch = globalThis.fetch;
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const token = getAuthToken();
+  const headers = new Headers(init?.headers || {});
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await baseFetch(input, { ...init, headers });
+  try {
+    const url = typeof input === "string" ? input : input.toString();
+    if (
+      res.status === 401 &&
+      typeof window !== "undefined" &&
+      !url.includes("/auth/login") &&
+      !url.includes("/auth/register")
+    ) {
+      clearAuthToken();
+      window.location.href = "/login";
+    }
+  } catch {
+    // ignore redirect errors
+  }
+  return res;
+}
+
+// 兼容现有调用：在本模块内统一走带鉴权的 fetch
+const fetch: typeof baseFetch = apiFetch;
+
+// ============ Auth API ============
+export interface AuthTokenResponse {
+  access_token: string;
+  token_type: string;
+}
+
+export async function registerUser(data: { email: string; password: string }): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+}
+
+export async function loginUser(data: { email: string; password: string }): Promise<AuthTokenResponse> {
+  const res = await apiFetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
 // 统一的请求头配置

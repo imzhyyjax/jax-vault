@@ -1,15 +1,16 @@
 """
 系统维护相关API
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from datetime import date
 from app.db.session import get_conn
+from app.deps import get_current_user
 
 router = APIRouter(prefix="/system", tags=["System"])
 
 
 @router.post("/rebuild_holdings")
-def rebuild_holdings_snapshot():
+def rebuild_holdings_snapshot(current_user=Depends(get_current_user)):
     """重建持仓快照：根据交易记录重新计算所有持仓"""
     conn = get_conn()
     cur = conn.cursor()
@@ -25,10 +26,12 @@ def rebuild_holdings_snapshot():
                 COALESCE(SUM(CASE WHEN t.side = 'buy' THEN t.quantity ELSE -t.quantity END), 0) as total_shares,
                 COALESCE(SUM(CASE WHEN t.side = 'buy' THEN t.amount ELSE -t.amount END), 0) as total_cost
             FROM trades t
+            JOIN portfolios p ON p.id = t.portfolio_id
             WHERE t.is_valid = true
+            AND p.user_id = %(user_id)s
             GROUP BY t.portfolio_id, t.asset_id
             HAVING SUM(CASE WHEN t.side = 'buy' THEN t.quantity ELSE -t.quantity END) > 0
-        """)
+        """, {"user_id": current_user["id"]})
         
         positions = cur.fetchall()
         

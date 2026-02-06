@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from app.db.session import get_conn
+from app.deps import get_current_user
 from app.schemas.asset import (
     AssetCreate,
     AssetUpdate,
@@ -16,15 +17,16 @@ def get_assets(
     status: Optional[str] = Query(None, description="筛选状态: holding/archived/watchlist"),
     market: Optional[str] = Query(None, description="筛选市场: CN/US/HK"),
     bucket: Optional[str] = Query(None, description="筛选类型: progressive/defensive"),
-    limit: int = Query(100, le=500)
+    limit: int = Query(100, le=500),
+    current_user=Depends(get_current_user)
 ):
     """获取资产列表"""
     conn = get_conn()
     cur = conn.cursor()
 
     # 构建查询条件
-    where_clauses = []
-    params = {}
+    where_clauses = ["user_id = %(user_id)s"]
+    params = {"user_id": current_user["id"]}
 
     if status:
         where_clauses.append("status = %(status)s")
@@ -64,7 +66,7 @@ def get_assets(
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)
-def get_asset(asset_id: int):
+def get_asset(asset_id: int, current_user=Depends(get_current_user)):
     """获取单个资产详情"""
     conn = get_conn()
     cur = conn.cursor()
@@ -76,9 +78,10 @@ def get_asset(asset_id: int):
         created_at, updated_at
     FROM assets
     WHERE id = %(asset_id)s
+    AND user_id = %(user_id)s
     """
 
-    cur.execute(sql, {"asset_id": asset_id})
+    cur.execute(sql, {"asset_id": asset_id, "user_id": current_user["id"]})
     row = cur.fetchone()
 
     cur.close()
@@ -91,14 +94,18 @@ def get_asset(asset_id: int):
 
 
 @router.post("/", response_model=AssetResponse, status_code=201)
-def create_asset(asset: AssetCreate):
+def create_asset(asset: AssetCreate, current_user=Depends(get_current_user)):
     """创建资产"""
     conn = get_conn()
     cur = conn.cursor()
 
     # 检查是否已存在
-    check_sql = "SELECT id FROM assets WHERE market = %(market)s AND code = %(code)s"
-    cur.execute(check_sql, {"market": asset.market, "code": asset.code})
+    check_sql = """
+    SELECT id FROM assets
+    WHERE market = %(market)s AND code = %(code)s
+    AND user_id = %(user_id)s
+    """
+    cur.execute(check_sql, {"market": asset.market, "code": asset.code, "user_id": current_user["id"]})
     if cur.fetchone():
         cur.close()
         conn.close()
@@ -106,15 +113,17 @@ def create_asset(asset: AssetCreate):
 
     sql = """
     INSERT INTO assets
-    (market, code, name, bucket, subclass, currency, benchmark, provider, status)
+    (user_id, market, code, name, bucket, subclass, currency, benchmark, provider, status)
     VALUES
-    (%(market)s, %(code)s, %(name)s, %(bucket)s, %(subclass)s, 
+    (%(user_id)s, %(market)s, %(code)s, %(name)s, %(bucket)s, %(subclass)s, 
      %(currency)s, %(benchmark)s, %(provider)s, %(status)s)
     RETURNING id, market, code, name, bucket, subclass, currency, 
               benchmark, provider, status, created_at, updated_at
     """
 
-    cur.execute(sql, asset.model_dump())
+    data = asset.model_dump()
+    data["user_id"] = current_user["id"]
+    cur.execute(sql, data)
     new_asset = cur.fetchone()
 
     conn.commit()
@@ -125,7 +134,7 @@ def create_asset(asset: AssetCreate):
 
 
 @router.post("/from_universe", response_model=AssetResponse, status_code=201)
-def create_asset_from_universe(req: AssetFromUniverseRequest):
+def create_asset_from_universe(req: AssetFromUniverseRequest, current_user=Depends(get_current_user)):
     """从基金库添加资产"""
     conn = get_conn()
     cur = conn.cursor()
@@ -145,8 +154,12 @@ def create_asset_from_universe(req: AssetFromUniverseRequest):
         raise HTTPException(status_code=404, detail="基金库中未找到该基金")
 
     # 检查是否已添加
-    check_sql = "SELECT id FROM assets WHERE market = 'CN' AND code = %(code)s"
-    cur.execute(check_sql, {"code": req.fund_code})
+    check_sql = """
+    SELECT id FROM assets
+    WHERE market = 'CN' AND code = %(code)s
+    AND user_id = %(user_id)s
+    """
+    cur.execute(check_sql, {"code": req.fund_code, "user_id": current_user["id"]})
     if cur.fetchone():
         cur.close()
         conn.close()
@@ -155,14 +168,15 @@ def create_asset_from_universe(req: AssetFromUniverseRequest):
     # 插入 assets 表
     insert_sql = """
     INSERT INTO assets
-    (market, code, name, bucket, subclass, currency, status, provider)
+    (user_id, market, code, name, bucket, subclass, currency, status, provider)
     VALUES
-    ('CN', %(code)s, %(name)s, %(bucket)s, %(subclass)s, 'CNY', %(status)s, 'eastmoney')
+    (%(user_id)s, 'CN', %(code)s, %(name)s, %(bucket)s, %(subclass)s, 'CNY', %(status)s, 'eastmoney')
     RETURNING id, market, code, name, bucket, subclass, currency, 
               benchmark, provider, status, created_at, updated_at
     """
 
     cur.execute(insert_sql, {
+        "user_id": current_user["id"],
         "code": fund["code"],
         "name": fund["name"],
         "bucket": req.bucket,
@@ -180,14 +194,14 @@ def create_asset_from_universe(req: AssetFromUniverseRequest):
 
 
 @router.put("/{asset_id}", response_model=AssetResponse)
-def update_asset(asset_id: int, asset_update: AssetUpdate):
+def update_asset(asset_id: int, asset_update: AssetUpdate, current_user=Depends(get_current_user)):
     """更新资产"""
     conn = get_conn()
     cur = conn.cursor()
 
     # 检查资产是否存在
-    check_sql = "SELECT id FROM assets WHERE id = %(id)s"
-    cur.execute(check_sql, {"id": asset_id})
+    check_sql = "SELECT id FROM assets WHERE id = %(id)s AND user_id = %(user_id)s"
+    cur.execute(check_sql, {"id": asset_id, "user_id": current_user["id"]})
     if not cur.fetchone():
         cur.close()
         conn.close()
@@ -206,12 +220,13 @@ def update_asset(asset_id: int, asset_update: AssetUpdate):
     sql = f"""
     UPDATE assets
     SET {', '.join(set_clauses)}
-    WHERE id = %(asset_id)s
+    WHERE id = %(asset_id)s AND user_id = %(user_id)s
     RETURNING id, market, code, name, bucket, subclass, currency, 
               benchmark, provider, status, created_at, updated_at
     """
 
     update_data["asset_id"] = asset_id
+    update_data["user_id"] = current_user["id"]
     cur.execute(sql, update_data)
     updated_asset = cur.fetchone()
 
@@ -223,7 +238,7 @@ def update_asset(asset_id: int, asset_update: AssetUpdate):
 
 
 @router.delete("/{asset_id}", status_code=204)
-def delete_asset(asset_id: int):
+def delete_asset(asset_id: int, current_user=Depends(get_current_user)):
     """删除资产"""
     conn = get_conn()
     cur = conn.cursor()
@@ -252,8 +267,8 @@ def delete_asset(asset_id: int):
         cur.execute("DELETE FROM prices WHERE asset_id = %(id)s", {"id": asset_id})
 
     # 删除资产
-    delete_sql = "DELETE FROM assets WHERE id = %(id)s RETURNING id"
-    cur.execute(delete_sql, {"id": asset_id})
+    delete_sql = "DELETE FROM assets WHERE id = %(id)s AND user_id = %(user_id)s RETURNING id"
+    cur.execute(delete_sql, {"id": asset_id, "user_id": current_user["id"]})
     deleted = cur.fetchone()
 
     if not deleted:
@@ -269,7 +284,7 @@ def delete_asset(asset_id: int):
 
 
 @router.get("/stats/summary")
-def get_assets_stats():
+def get_assets_stats(current_user=Depends(get_current_user)):
     """获取资产统计摘要"""
     conn = get_conn()
     cur = conn.cursor()
@@ -286,9 +301,10 @@ def get_assets_stats():
         COUNT(*) FILTER (WHERE market = 'US') as us_count,
         COUNT(*) FILTER (WHERE market = 'HK') as hk_count
     FROM assets
+    WHERE user_id = %(user_id)s
     """
 
-    cur.execute(sql)
+    cur.execute(sql, {"user_id": current_user["id"]})
     stats = cur.fetchone()
 
     cur.close()
